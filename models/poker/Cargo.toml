@@ -1,0 +1,9 @@
+[package]
+name = "openplay-holdem"
+version = "0.1.0"
+edition = "2024"
+[lib]
+
+
+[dependencies]
+rand = { workspace = true }
