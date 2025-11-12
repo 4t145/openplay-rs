@@ -1,9 +1,10 @@
 [workspace]
 resolver = "2"
-members = ["models/*"]
+members = ["games/*","models/*"]
 
 [workspace.metadata]
 
 
 [workspace.dependencies]
 rand = { version = "0.9.2" }
+serde = { version = "1", features = ["derive"] }
