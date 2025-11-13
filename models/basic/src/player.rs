@@ -3,6 +3,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlayerId(Bytes);
 
+impl From<Bytes> for PlayerId {
+    fn from(bytes: Bytes) -> Self {
+        PlayerId(bytes)
+    }
+}
+
 impl Serialize for PlayerId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

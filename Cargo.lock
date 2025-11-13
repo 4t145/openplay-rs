@@ -44,8 +44,10 @@ dependencies = [
 name = "openplay-holdem"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "openplay-basic",
  "openplay-poker",
+ "rand",
 ]
 
 [[package]]

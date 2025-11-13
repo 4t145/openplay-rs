@@ -78,6 +78,7 @@ impl Card {
 }
 
 // 一副扑克牌
+#[derive(Debug, Clone)]
 pub struct Deck {
     cards: Vec<Card>,
 }

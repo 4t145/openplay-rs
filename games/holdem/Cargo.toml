@@ -6,3 +6,5 @@ edition = "2024"
 [dependencies]
 openplay-basic = { path = "../../models/basic" }
 openplay-poker = { path = "../../models/poker" }
+bytes = "1.0"
+rand = "0.9"
