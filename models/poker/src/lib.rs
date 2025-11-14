@@ -1,6 +1,10 @@
 use rand::rng;
 use rand::seq::SliceRandom;
 
+pub mod fmt;
+pub mod unicode;
+pub mod utils;
+
 // 扑克牌花色和点数
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Suit {
@@ -54,6 +58,8 @@ pub struct NaturalCard {
     pub rank: Rank,
 }
 
+
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Card {
     NaturalCard(NaturalCard),
@@ -61,6 +67,8 @@ pub enum Card {
     BlackJoker,
     WildCard,
 }
+
+
 
 impl Card {
     pub fn is_natural(&self) -> bool {
@@ -115,9 +123,4 @@ impl Deck {
     pub fn deal(&mut self) -> Option<Card> {
         self.cards.pop()
     }
-
-    
 }
-
-pub mod utils;
-pub mod unicode;
