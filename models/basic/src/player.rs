@@ -1,5 +1,7 @@
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
+
+use crate::message::Message;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlayerId(Bytes);
 
@@ -53,3 +55,10 @@ pub struct Player {
     pub is_bot: bool,
 }
 
+pub enum PlayerAgentError {
+    MessageHandlingFailed,
+}
+
+pub trait PlayerAgent {
+    fn handle_message(&self, event: Message) -> impl Future<Output = Result<(), PlayerAgentError>>;
+}
