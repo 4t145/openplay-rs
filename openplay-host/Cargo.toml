@@ -1,0 +1,11 @@
+[package]
+name = "openplay-host"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+openplay-basic = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+tracing = { version = "0.1" }
+thiserror = { version = "2" }

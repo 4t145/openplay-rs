@@ -1,0 +1,9 @@
+[package]
+name = "openplay-pa-programmed"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+openplay-basic = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["sync"] }

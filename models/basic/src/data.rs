@@ -1,7 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Data(pub Bytes);

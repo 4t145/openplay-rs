@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 
 use crate::data::Data;
@@ -9,8 +8,20 @@ use crate::data::Data;
 pub struct Codec(pub Cow<'static, str>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub codec: Codec,
-    pub r#type: String,
+pub struct TypedData {
+    pub r#type: DataType,
+    pub codec: String,
     pub data: Data,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct App {
+    pub id: String,
+    pub revision: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataType {
+    pub app: App,
+    pub r#type: String,
 }

@@ -1,9 +1,24 @@
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use std::pin::Pin;
 
-use crate::message::Message;
+use bytes::Bytes;
+use futures_util::future::BoxFuture;
+use serde::{Deserialize, Serialize};
+pub mod player_event;
+use crate::{
+    message::{self, TypedData},
+    player::player_event::PlayerEvent,
+    room::RoomEvent,
+};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlayerId(Bytes);
+
+impl std::fmt::Display for PlayerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use base64::prelude::*;
+        let encoded = BASE64_STANDARD.encode(&self.0);
+        write!(f, "{}", encoded)
+    }
+}
 
 impl From<Bytes> for PlayerId {
     fn from(bytes: Bytes) -> Self {
@@ -55,10 +70,70 @@ pub struct Player {
     pub is_bot: bool,
 }
 
+impl Player {
+    pub fn new_robot(nickname: String, id: PlayerId) -> Self {
+        Player {
+            nickname,
+            id,
+            avatar_url: None,
+            is_bot: true,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
 pub enum PlayerAgentError {
+    #[error("Failed to send room event")]
     MessageHandlingFailed,
 }
 
-pub trait PlayerAgent {
-    fn handle_message(&self, event: Message) -> impl Future<Output = Result<(), PlayerAgentError>>;
+pub trait PlayerAgent: Send + Sync + 'static {
+    type Error: std::error::Error + Send + Sync;
+    fn send_room_event(
+        &self,
+        event: RoomEvent,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn receive_player_event(
+        &self,
+    ) -> impl Future<Output = Result<Option<PlayerEvent>, Self::Error>> + Send;
+    fn close(&self) -> impl Future<Output = ()> + Send;
 }
+type DynError = dyn std::error::Error + Send + Sync + 'static;
+
+pub trait DynPlayerAgentTrait {
+    fn send_room_event<'a>(&'a self, event: RoomEvent) -> BoxFuture<'a, Result<(), Box<DynError>>>;
+    fn receive_player_event<'a>(
+        &'a self,
+    ) -> BoxFuture<'a, Result<Option<PlayerEvent>, Box<DynError>>>;
+    fn close<'a>(&'a self) -> BoxFuture<'a, ()>;
+}
+
+impl<T> DynPlayerAgentTrait for T
+where
+    T: PlayerAgent,
+    T::Error: std::error::Error + Send + Sync + 'static,
+{
+    fn send_room_event<'a>(&'a self, event: RoomEvent) -> BoxFuture<'a, Result<(), Box<DynError>>> {
+        Box::pin(async move { self.send_room_event(event).await.map_err(Box::from) })
+    }
+
+    fn receive_player_event<'a>(
+        &'a self,
+    ) -> BoxFuture<'a, Result<Option<PlayerEvent>, Box<DynError>>> {
+        Box::pin(async move { self.receive_player_event().await.map_err(Box::from) })
+    }
+
+    fn close<'a>(&'a self) -> BoxFuture<'a, ()> {
+        Box::pin(async move { self.close().await })
+    }
+}
+
+pub fn new_dyn_player_agent<T>(agent: T) -> DynPlayerAgent
+where
+    T: PlayerAgent,
+    T::Error: std::error::Error + Send + Sync + 'static,
+{
+    Box::new(agent)
+}
+
+pub type DynPlayerAgent = Box<dyn DynPlayerAgentTrait + Send + Sync>;
