@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ban::Ban, player::PlayerId, room::{GameMessage, PlayerChat, PlayerReady, RoomPlayerPosition}
+    ban::Ban,
+    room::{GameMessage, PlayerChat, PlayerReady, RoomPlayerPosition},
+    user::UserId,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +23,7 @@ pub enum PlayerEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KickOut {
-    pub player: PlayerId,
+    pub player: UserId,
     pub reason: Option<String>,
     pub ban: Option<Ban>,
 }
@@ -30,16 +32,17 @@ pub struct KickOut {
 pub struct BecomePlayer {
     pub position: RoomPlayerPosition,
 }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BecomeObserver {
-    pub view: ObserverView
+    pub view: RoomObserverView,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(tag="kind", content="data")]
-pub enum ObserverView {
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Hash, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data")]
+pub enum RoomObserverView {
     Position(RoomPlayerPosition),
-    Player(PlayerId),
+    Player(UserId),
     #[default]
-    Neutral
+    Neutral,
 }

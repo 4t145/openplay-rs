@@ -40,7 +40,6 @@ impl Display for NaturalCard {
     }
 }
 
-
 pub struct Cards<'c>(pub &'c [Card]);
 impl Display for Cards<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

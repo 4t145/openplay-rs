@@ -1,8 +1,14 @@
-use crate::{message::{App, TypedData}, room::GameMessage};
+use std::sync::Arc;
+
+use crate::{
+    message::{App, TypedData},
+    room::{GameMessage, RoomContext},
+    user::game_action::GameAction,
+};
 
 pub trait Game: Send + Sync + 'static {
     fn meta(&self) -> GameMeta;
-    fn handle_message(&mut self, message: GameMessage) -> UpdateGameState;
+    fn handle_action(&mut self, ctx: &RoomContext, event: GameEvent) -> UpdateGameState;
     fn start(&mut self) -> UpdateGameState;
     fn snapshot(&self) -> TypedData;
 }
@@ -49,4 +55,25 @@ pub enum ServerMessageError {
 #[error("Message rejected: {reason}")]
 pub struct MessageRejection {
     pub reason: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimerId(Arc<str>);
+
+#[derive(Debug, Clone)]
+pub struct IntervalId(Arc<str>);
+
+pub enum GameEvent {
+    Action(GameAction),
+    TimerExpired(TimeExpired),
+    Interval(Interval),
+    GameStart,
+}
+
+pub struct TimeExpired {
+    pub timer_id: TimerId,
+}
+
+pub struct Interval {
+    pub interval_id: IntervalId,
 }

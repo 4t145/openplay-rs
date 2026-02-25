@@ -1,12 +1,13 @@
 use rand::rng;
 use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 
 pub mod fmt;
 pub mod unicode;
 pub mod utils;
 
 // 扑克牌花色和点数
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Suit {
     Hearts,
     Diamonds,
@@ -14,7 +15,7 @@ pub enum Suit {
     Spades,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Rank {
     Two = 2,
@@ -52,23 +53,19 @@ impl Rank {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NaturalCard {
     pub suit: Suit,
     pub rank: Rank,
 }
 
-
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Card {
     NaturalCard(NaturalCard),
     RedJoker,
     BlackJoker,
     WildCard,
 }
-
-
 
 impl Card {
     pub fn is_natural(&self) -> bool {
@@ -86,7 +83,7 @@ impl Card {
 }
 
 // 一副扑克牌
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Deck {
     cards: Vec<Card>,
 }

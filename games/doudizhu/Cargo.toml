@@ -1,0 +1,20 @@
+[package]
+name = "openplay-doudizhu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+openplay-basic = { path = "../../models/basic" }
+openplay-poker = { path = "../../models/poker" }
+bytes = "1.0"
+rand = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1.28", features = ["full"] }
+openplay-host = { path = "../../host" }
+openplay-pa-programmed = { path = "../../player-agents/programmed" }
+tracing = "0.1"
+tracing-subscriber = "0.3"

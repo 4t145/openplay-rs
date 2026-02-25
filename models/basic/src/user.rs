@@ -4,15 +4,17 @@ use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 pub mod player_event;
+pub mod room_action;
+pub mod game_action;
 use crate::{
     message::{self, TypedData},
-    player::player_event::PlayerEvent,
+    user::player_event::PlayerEvent,
     room::RoomEvent,
 };
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PlayerId(Bytes);
+pub struct UserId(Bytes);
 
-impl std::fmt::Display for PlayerId {
+impl std::fmt::Display for UserId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use base64::prelude::*;
         let encoded = BASE64_STANDARD.encode(&self.0);
@@ -20,13 +22,13 @@ impl std::fmt::Display for PlayerId {
     }
 }
 
-impl From<Bytes> for PlayerId {
+impl From<Bytes> for UserId {
     fn from(bytes: Bytes) -> Self {
-        PlayerId(bytes)
+        UserId(bytes)
     }
 }
 
-impl Serialize for PlayerId {
+impl Serialize for UserId {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -35,7 +37,7 @@ impl Serialize for PlayerId {
     }
 }
 
-impl<'de> Deserialize<'de> for PlayerId {
+impl<'de> Deserialize<'de> for UserId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -43,7 +45,7 @@ impl<'de> Deserialize<'de> for PlayerId {
         struct PlayerIdVisitor;
 
         impl<'de> serde::de::Visitor<'de> for PlayerIdVisitor {
-            type Value = PlayerId;
+            type Value = UserId;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 formatter.write_str("a byte array representing a PlayerId")
@@ -53,7 +55,18 @@ impl<'de> Deserialize<'de> for PlayerId {
             where
                 E: serde::de::Error,
             {
-                Ok(PlayerId(Bytes::copy_from_slice(v)))
+                Ok(UserId(Bytes::copy_from_slice(v)))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut bytes = Vec::new();
+                while let Some(byte) = seq.next_element()? {
+                    bytes.push(byte);
+                }
+                Ok(UserId(Bytes::from(bytes)))
             }
         }
 
@@ -62,17 +75,17 @@ impl<'de> Deserialize<'de> for PlayerId {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Player {
+pub struct User {
     pub nickname: String,
-    pub id: PlayerId,
+    pub id: UserId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
     pub is_bot: bool,
 }
 
-impl Player {
-    pub fn new_robot(nickname: String, id: PlayerId) -> Self {
-        Player {
+impl User {
+    pub fn new_robot(nickname: String, id: UserId) -> Self {
+        User {
             nickname,
             id,
             avatar_url: None,

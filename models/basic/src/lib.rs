@@ -9,7 +9,7 @@ use std::collections::HashMap;
 pub mod cursor;
 pub mod game;
 pub mod message;
-pub mod player;
+pub mod user;
 pub mod room;
 pub mod ban;
 pub mod data;

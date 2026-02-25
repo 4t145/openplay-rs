@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["games/*", "models/*", "openplay-host", "player-agents/*"]
+members = ["games/*", "models/*", "host", "player-agents/*"]
 
 [workspace.metadata]
 

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use openplay_basic::{
     game::{DynGame, UpdateGameState},
-    player::{DynPlayerAgent, PlayerId, player_event::PlayerEvent},
+    user::{DynPlayerAgent, UserId, player_event::PlayerEvent},
     room::{
         GameMessage, PlayerBecomeObserver, PlayerBecomePlayer, PlayerChat, PlayerKickedOut,
         PlayerLeave, PlayerReady, PlayerReconnected, Room, RoomEvent, RoomObserverState,
@@ -16,7 +16,7 @@ use crate::connection::PlayerEventWithPid;
 pub struct RoomService {
     pub game: DynGame,
     pub room: Room,
-    pub player_agents: HashMap<PlayerId, DynPlayerAgent>,
+    pub player_agents: HashMap<UserId, DynPlayerAgent>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -99,7 +99,7 @@ impl RoomService {
                                 }
                             }
                             PlayerEvent::KickOut(kick_out) => {
-                                if let Some(player_state) = room.remove_player(&kick_out.player) {
+                                if let Some(_player_state) = room.remove_player(&kick_out.player) {
                                     connection_handle
                                         .broadcast_room_event(RoomEvent::PlayerKickedOut(
                                             PlayerKickedOut {
@@ -115,7 +115,8 @@ impl RoomService {
                                 // TODO: Handle heartbeat, e.g., update player's last active timestamp
                             }
                             PlayerEvent::GameMessage(game_message) => {
-                                let update = game.handle_message(GameMessage {
+                                tracing::debug!("Service processing GameMessage from {}", player_id);
+                                let update = game.handle_action(GameMessage {
                                     player_id,
                                     message: game_message.message,
                                 });
@@ -124,13 +125,14 @@ impl RoomService {
                                     .await?;
                             }
                             PlayerEvent::StartGame => {
+                                tracing::info!("Service received StartGame from {}", player_id);
                                 let update = game.start();
                                 connection_handle
                                     .broadcast_room_event(RoomEvent::UpdateGameState(update))
                                     .await?;
                             }
                             PlayerEvent::Leave => {
-                                if let Some(player_state) = room.remove_player(&player_id) {
+                                if let Some(_player_state) = room.remove_player(&player_id) {
                                     connection_handle
                                         .broadcast_room_event(RoomEvent::PlayerLeave(PlayerLeave {
                                             player_id,
