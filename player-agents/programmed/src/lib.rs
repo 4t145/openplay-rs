@@ -1,18 +1,19 @@
 use std::{collections::VecDeque, convert::Infallible, sync::Arc};
 
 use openplay_basic::{
-    game::UpdateGameState,
+    game::GameViewUpdate,
     message::TypedData,
-    user::{User, PlayerAgent, player_event::PlayerEvent},
-    room::GameMessage,
+    room::Update,
+    user::{ActionData, User, UserAgent, game_action::GameActionData},
 };
 use tokio::sync::{Mutex, Notify};
 
 pub struct ProgrammedPlayerAgent {
     pub player: User,
     pub program: Arc<dyn PlayerProgram>,
-    pub pending_messages: Arc<Mutex<VecDeque<TypedData>>>,
+    pub pending_actions: Arc<Mutex<VecDeque<ActionData>>>,
     pub notify: Arc<Notify>,
+    pub last_processed_version: Arc<Mutex<Option<u32>>>,
 }
 
 impl ProgrammedPlayerAgent {
@@ -20,8 +21,9 @@ impl ProgrammedPlayerAgent {
         Self {
             player,
             program,
-            pending_messages: Arc::new(Mutex::new(VecDeque::new())),
+            pending_actions: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
+            last_processed_version: Arc::new(Mutex::new(None)),
         }
     }
     pub fn new<P: PlayerProgram>(player: User, program: P) -> Self {
@@ -29,20 +31,36 @@ impl ProgrammedPlayerAgent {
     }
 }
 
-impl PlayerAgent for ProgrammedPlayerAgent {
+impl UserAgent for ProgrammedPlayerAgent {
     type Error = Infallible;
 
-    fn send_room_event(
-        &self,
-        event: openplay_basic::room::RoomEvent,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+    fn send_update(&self, update: Update) -> impl Future<Output = Result<(), Self::Error>> + Send {
         let program = self.program.clone();
-        let pending_messages = self.pending_messages.clone();
+        let pending_actions = self.pending_actions.clone();
         let notify = self.notify.clone();
+        let last_processed_version = self.last_processed_version.clone();
         async move {
-            if let openplay_basic::room::RoomEvent::UpdateGameState(update) = event {
-                if let Some(response) = program.decide(update) {
-                    pending_messages.lock().await.push_back(response);
+            if let Update::GameView(game_view_update) = update {
+                // Bots only care about game updates usually, but could be extended
+                let current_version = game_view_update.new_view.version;
+                
+                // Check for duplicate updates
+                let mut last_version_guard = last_processed_version.lock().await;
+                if let Some(last) = *last_version_guard {
+                    if current_version <= last {
+                        // Ignore outdated or duplicate update
+                        return Ok(());
+                    }
+                }
+                *last_version_guard = Some(current_version);
+                drop(last_version_guard); // Release lock early
+
+                if let Some(decision_message) = program.decide(&game_view_update) {
+                    let action_data = ActionData::GameAction(GameActionData {
+                        message: decision_message,
+                        ref_version: current_version,
+                    });
+                    pending_actions.lock().await.push_back(action_data);
                     notify.notify_one();
                 }
             }
@@ -50,20 +68,16 @@ impl PlayerAgent for ProgrammedPlayerAgent {
         }
     }
 
-    fn receive_player_event(
+    fn receive_player_action(
         &self,
-    ) -> impl Future<Output = Result<Option<PlayerEvent>, Self::Error>> + Send {
-        let player_id = self.player.id.clone();
-        let pending_messages = self.pending_messages.clone();
+    ) -> impl Future<Output = Result<Option<ActionData>, Self::Error>> + Send {
+        let pending_actions = self.pending_actions.clone();
         let notify = self.notify.clone();
         async move {
             loop {
-                let mut lock = pending_messages.lock().await;
-                if let Some(message) = lock.pop_front() {
-                    return Ok(Some(PlayerEvent::GameMessage(GameMessage {
-                        player_id: player_id.clone(),
-                        message,
-                    })));
+                let mut lock = pending_actions.lock().await;
+                if let Some(action) = lock.pop_front() {
+                    return Ok(Some(action));
                 }
                 drop(lock);
                 notify.notified().await;
@@ -77,5 +91,5 @@ impl PlayerAgent for ProgrammedPlayerAgent {
 }
 
 pub trait PlayerProgram: Send + Sync + 'static {
-    fn decide(&self, update: UpdateGameState) -> Option<TypedData>;
+    fn decide(&self, update: &GameViewUpdate) -> Option<TypedData>;
 }

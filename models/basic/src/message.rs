@@ -14,6 +14,12 @@ pub struct TypedData {
     pub data: Data,
 }
 
+impl std::fmt::Display for TypedData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}[{}]", self.r#type, self.codec)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct App {
     pub id: String,
@@ -24,4 +30,10 @@ pub struct App {
 pub struct DataType {
     pub app: App,
     pub r#type: String,
+}
+
+impl std::fmt::Display for DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}@{}/{}", self.app.id, self.app.revision, self.r#type)
+    }
 }

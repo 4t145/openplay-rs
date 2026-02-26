@@ -1,17 +1,23 @@
-mod room_event;
+mod room_update;
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    game::{GameUpdate, GameViewUpdate, Id},
+    user::{User, UserId},
     Dtu,
-    game::{IntervalId, TimerId},
-    user::{User, UserId, player_event::RoomObserverView},
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
     pub info: RoomInfo,
     pub state: RoomState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Update {
+    Room(RoomUpdate),
+    GameView(GameViewUpdate),
 }
 
 impl Room {
@@ -93,9 +99,21 @@ pub struct RoomObserverState {
     pub view: RoomObserverView,
     pub player: crate::user::User,
 }
-pub use room_event::*;
+pub use room_update::*;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct RoomPlayerPosition(String);
+
+impl From<String> for RoomPlayerPosition {
+    fn from(s: String) -> Self {
+        RoomPlayerPosition(s)
+    }
+}
+
+impl From<&str> for RoomPlayerPosition {
+    fn from(s: &str) -> Self {
+        RoomPlayerPosition(s.to_string())
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub enum RoomPhaseKind {
@@ -114,17 +132,26 @@ pub enum RoomUserPosition {
     Observer(RoomObserverView),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Hash, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data")]
+pub enum RoomObserverView {
+    Position(RoomPlayerPosition),
+    Player(UserId),
+    #[default]
+    Neutral,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, Hash, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data")]
+pub enum RoomView {
+    Position(RoomPlayerPosition),
+    #[default]
+    Neutral,
+}
+
 pub struct RoomContext {}
 
 impl RoomContext {
-    pub fn request_timer() -> TimerId {
-        todo!()
-    }
-
-    pub fn request_interval() -> IntervalId {
-        todo!()
-    }
-
     pub fn get_room_info(&self) -> RoomInfo {
         todo!()
     }

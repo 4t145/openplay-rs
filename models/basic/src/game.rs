@@ -1,16 +1,14 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
     message::{App, TypedData},
-    room::{GameMessage, RoomContext},
-    user::game_action::GameAction,
+    room::{RoomContext, RoomPlayerPosition, RoomView},
+    user::Action,
 };
 
 pub trait Game: Send + Sync + 'static {
     fn meta(&self) -> GameMeta;
-    fn handle_action(&mut self, ctx: &RoomContext, event: GameEvent) -> UpdateGameState;
-    fn start(&mut self) -> UpdateGameState;
-    fn snapshot(&self) -> TypedData;
+    fn handle_action(&mut self, ctx: &RoomContext, event: SequencedGameUpdate) -> GameUpdate;
 }
 
 pub type DynGame = Box<dyn Game>;
@@ -19,31 +17,33 @@ pub struct GameMeta {
     pub app: App,
     pub description: String,
 }
-pub enum GameState {
-    UpdateGameState,
-}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct AcceptedMessage {
+pub struct ClientEvent {
     pub seq: u32,
-    #[serde(flatten)]
-    pub message: GameMessage,
+    pub message: TypedData,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct UpdateGameState {
-    pub messages: Vec<AcceptedMessage>,
-    pub state: TypedData,
+pub struct GameState {
+    pub version: u32,
+    pub data: TypedData,
 }
 
-impl UpdateGameState {
-    pub fn snapshot(state: TypedData) -> Self {
-        UpdateGameState {
-            messages: Vec::new(),
-            state,
-        }
-    }
+#[derive(Debug, Clone)]
+pub struct GameUpdate {
+    pub views: HashMap<RoomView, GameViewUpdate>,
+    pub snapshot: GameState,
+    pub commands: Vec<GameCommand>,
 }
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub struct GameViewUpdate {
+    pub events: Vec<ClientEvent>,
+    pub new_view: GameState,
+}
+
+impl GameUpdate {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServerMessageError {
@@ -57,23 +57,44 @@ pub struct MessageRejection {
     pub reason: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct TimerId(Arc<str>);
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct Id(Arc<str>);
 
-#[derive(Debug, Clone)]
-pub struct IntervalId(Arc<str>);
+impl From<String> for Id {
+    fn from(s: String) -> Self {
+        Id(s.into())
+    }
+}
 
+impl From<&str> for Id {
+    fn from(s: &str) -> Self {
+        Id(s.into())
+    }
+}
+
+pub struct SequencedGameUpdate {
+    pub event: GameEvent,
+    pub seq: u32,
+}
 pub enum GameEvent {
-    Action(GameAction),
+    Action(Action),
     TimerExpired(TimeExpired),
     Interval(Interval),
     GameStart,
 }
 
 pub struct TimeExpired {
-    pub timer_id: TimerId,
+    pub timer_id: Id,
 }
 
 pub struct Interval {
-    pub interval_id: IntervalId,
+    pub interval_id: Id,
+}
+
+#[derive(Debug, Clone)]
+pub enum GameCommand {
+    CreateTimer { id: Id, duration: Duration },
+    CancelTimer { id: Id, duration: Duration },
+    CreateInterval { id: Id },
+    CancelInterval { id: Id },
 }

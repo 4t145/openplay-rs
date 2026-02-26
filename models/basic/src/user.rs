@@ -3,16 +3,70 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
 use serde::{Deserialize, Serialize};
+pub mod game_action;
 pub mod player_event;
 pub mod room_action;
-pub mod game_action;
 use crate::{
     message::{self, TypedData},
-    user::player_event::PlayerEvent,
-    room::RoomEvent,
+    room::{RoomEvent, Update},
+    user::{game_action::GameActionData, room_action::RoomActionData},
 };
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserId(Bytes);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum ActionSource {
+    User(UserId),
+    System,
+}
+
+impl From<UserId> for ActionSource {
+    fn from(user_id: UserId) -> Self {
+        ActionSource::User(user_id)
+    }
+}
+
+impl From<&UserId> for ActionSource {
+    fn from(user_id: &UserId) -> Self {
+        ActionSource::User(user_id.clone())
+    }
+}
+
+impl From<()> for ActionSource {
+    fn from(_: ()) -> Self {
+        ActionSource::System
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Action {
+    pub source: ActionSource,
+    #[serde(flatten)]
+    pub data: ActionData,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action_type", content = "data")]
+pub enum ActionData {
+    RoomAction(RoomActionData),
+    GameAction(GameActionData),
+}
+
+impl ActionData {
+    pub fn with_source(self, source: impl Into<ActionSource>) -> Action {
+        Action { source: source.into(), data: self }   
+    }
+}
+
+impl Action {
+    pub fn source(&self) -> Option<&UserId> {
+        match &self.source {
+            ActionSource::User(user_id) => Some(user_id),
+            ActionSource::System => None,
+        }
+    }
+}
 
 impl std::fmt::Display for UserId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -48,7 +102,7 @@ impl<'de> Deserialize<'de> for UserId {
             type Value = UserId;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a byte array representing a PlayerId")
+                formatter.write_str("a byte array representing a UserId")
             }
 
             fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
@@ -95,45 +149,38 @@ impl User {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum PlayerAgentError {
-    #[error("Failed to send room event")]
+pub enum UserAgentError {
+    #[error("Failed to send update")]
     MessageHandlingFailed,
 }
 
-pub trait PlayerAgent: Send + Sync + 'static {
+pub trait UserAgent: Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync;
-    fn send_room_event(
+    fn send_update(&self, update: Update) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn receive_player_action(
         &self,
-        event: RoomEvent,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
-    fn receive_player_event(
-        &self,
-    ) -> impl Future<Output = Result<Option<PlayerEvent>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<Option<ActionData>, Self::Error>> + Send;
     fn close(&self) -> impl Future<Output = ()> + Send;
 }
 type DynError = dyn std::error::Error + Send + Sync + 'static;
 
-pub trait DynPlayerAgentTrait {
-    fn send_room_event<'a>(&'a self, event: RoomEvent) -> BoxFuture<'a, Result<(), Box<DynError>>>;
-    fn receive_player_event<'a>(
-        &'a self,
-    ) -> BoxFuture<'a, Result<Option<PlayerEvent>, Box<DynError>>>;
+pub trait DynUserAgentTrait {
+    fn send_update<'a>(&'a self, update: Update) -> BoxFuture<'a, Result<(), Box<DynError>>>;
+    fn receive_player_action<'a>(&'a self) -> BoxFuture<'a, Result<Option<ActionData>, Box<DynError>>>;
     fn close<'a>(&'a self) -> BoxFuture<'a, ()>;
 }
 
-impl<T> DynPlayerAgentTrait for T
+impl<T> DynUserAgentTrait for T
 where
-    T: PlayerAgent,
+    T: UserAgent,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
-    fn send_room_event<'a>(&'a self, event: RoomEvent) -> BoxFuture<'a, Result<(), Box<DynError>>> {
-        Box::pin(async move { self.send_room_event(event).await.map_err(Box::from) })
+    fn send_update<'a>(&'a self, update: Update) -> BoxFuture<'a, Result<(), Box<DynError>>> {
+        Box::pin(async move { self.send_update(update).await.map_err(Box::from) })
     }
 
-    fn receive_player_event<'a>(
-        &'a self,
-    ) -> BoxFuture<'a, Result<Option<PlayerEvent>, Box<DynError>>> {
-        Box::pin(async move { self.receive_player_event().await.map_err(Box::from) })
+    fn receive_player_action<'a>(&'a self) -> BoxFuture<'a, Result<Option<ActionData>, Box<DynError>>> {
+        Box::pin(async move { self.receive_player_action().await.map_err(Box::from) })
     }
 
     fn close<'a>(&'a self) -> BoxFuture<'a, ()> {
@@ -141,12 +188,12 @@ where
     }
 }
 
-pub fn new_dyn_player_agent<T>(agent: T) -> DynPlayerAgent
+pub fn new_dyn_user_agent<T>(agent: T) -> DynUserAgent
 where
-    T: PlayerAgent,
+    T: UserAgent,
     T::Error: std::error::Error + Send + Sync + 'static,
 {
     Box::new(agent)
 }
 
-pub type DynPlayerAgent = Box<dyn DynPlayerAgentTrait + Send + Sync>;
+pub type DynUserAgent = Box<dyn DynUserAgentTrait + Send + Sync>;

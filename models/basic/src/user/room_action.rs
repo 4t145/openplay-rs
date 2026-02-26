@@ -2,24 +2,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     message::TypedData,
-    room::{RoomChatMessageContent, RoomUserPosition}, user::UserId,
+    room::{Chat, RoomUserPosition}, user::UserId,
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RoomActionSource {
-    User(UserId),
-    System,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)] 
-pub struct RoomAction {
-    pub source: RoomActionSource,
-    pub kind: RoomActionKind,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum RoomActionKind {
-    Chat(RoomChatMessageContent),
+#[serde(tag = "data_type", content = "data")]
+pub enum RoomActionData {
+    Chat(Chat),
     ChangeReadyState(ReadyStateChange),
     PositionChange(PositionChange),
     RoomManage(RoomManage),
