@@ -9,6 +9,52 @@ use crate::{
 pub trait Game: Send + Sync + 'static {
     fn meta(&self) -> GameMeta;
     fn handle_action(&mut self, ctx: &RoomContext, event: SequencedGameUpdate) -> GameUpdate;
+
+    /// Get the default action for a player in the current state.
+    /// This is used for timeouts, auto-play, or hints.
+    fn default_action(&self, _player_id: &crate::user::UserId) -> Option<Action> {
+        None
+    }
+
+    /// Apply game configuration update.
+    fn apply_config(&mut self, _config: TypedData) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+pub trait GameBot<G: Game>: Send + Sync + 'static {
+    fn decide(&self, game: &G, player_id: &crate::user::UserId) -> Option<Action>;
+}
+
+pub struct WithBotAction<G, B> {
+    pub inner: G,
+    pub bot: B,
+}
+
+impl<G, B> Game for WithBotAction<G, B>
+where
+    G: Game,
+    B: GameBot<G> + Send + Sync + 'static,
+{
+    fn meta(&self) -> GameMeta {
+        self.inner.meta()
+    }
+
+    fn handle_action(&mut self, ctx: &RoomContext, event: SequencedGameUpdate) -> GameUpdate {
+        self.inner.handle_action(ctx, event)
+    }
+
+    fn default_action(&self, player_id: &crate::user::UserId) -> Option<Action> {
+        if let Some(action) = self.bot.decide(&self.inner, player_id) {
+            Some(action)
+        } else {
+            self.inner.default_action(player_id)
+        }
+    }
+
+    fn apply_config(&mut self, config: TypedData) -> Result<(), String> {
+        self.inner.apply_config(config)
+    }
 }
 
 pub type DynGame = Box<dyn Game>;

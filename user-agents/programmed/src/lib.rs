@@ -8,30 +8,30 @@ use openplay_basic::{
 };
 use tokio::sync::{Mutex, Notify};
 
-pub struct ProgrammedPlayerAgent {
-    pub player: User,
-    pub program: Arc<dyn PlayerProgram>,
+pub struct ProgrammedUserAgent {
+    pub user: User,
+    pub program: Arc<dyn UserProgram>,
     pub pending_actions: Arc<Mutex<VecDeque<ActionData>>>,
     pub notify: Arc<Notify>,
     pub last_processed_version: Arc<Mutex<Option<u32>>>,
 }
 
-impl ProgrammedPlayerAgent {
-    pub fn from_arc(player: User, program: Arc<dyn PlayerProgram>) -> Self {
+impl ProgrammedUserAgent {
+    pub fn from_arc(user: User, program: Arc<dyn UserProgram>) -> Self {
         Self {
-            player,
+            user,
             program,
             pending_actions: Arc::new(Mutex::new(VecDeque::new())),
             notify: Arc::new(Notify::new()),
             last_processed_version: Arc::new(Mutex::new(None)),
         }
     }
-    pub fn new<P: PlayerProgram>(player: User, program: P) -> Self {
-        Self::from_arc(player, Arc::new(program))
+    pub fn new<P: UserProgram>(user: User, program: P) -> Self {
+        Self::from_arc(user, Arc::new(program))
     }
 }
 
-impl UserAgent for ProgrammedPlayerAgent {
+impl UserAgent for ProgrammedUserAgent {
     type Error = Infallible;
 
     fn send_update(&self, update: Update) -> impl Future<Output = Result<(), Self::Error>> + Send {
@@ -68,7 +68,7 @@ impl UserAgent for ProgrammedPlayerAgent {
         }
     }
 
-    fn receive_player_action(
+    fn receive_action(
         &self,
     ) -> impl Future<Output = Result<Option<ActionData>, Self::Error>> + Send {
         let pending_actions = self.pending_actions.clone();
@@ -90,6 +90,6 @@ impl UserAgent for ProgrammedPlayerAgent {
     }
 }
 
-pub trait PlayerProgram: Send + Sync + 'static {
+pub trait UserProgram: Send + Sync + 'static {
     fn decide(&self, update: &GameViewUpdate) -> Option<TypedData>;
 }

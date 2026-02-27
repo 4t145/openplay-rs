@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 // use crate::{
 //     game::{DynGame, Game},
-//     player::{DynPlayerAgent, PlayerId},
+//     user::{DynUserAgent, UserId},
 //     room::Room,
 // };
 

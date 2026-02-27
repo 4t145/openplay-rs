@@ -157,7 +157,7 @@ pub enum UserAgentError {
 pub trait UserAgent: Send + Sync + 'static {
     type Error: std::error::Error + Send + Sync;
     fn send_update(&self, update: Update) -> impl Future<Output = Result<(), Self::Error>> + Send;
-    fn receive_player_action(
+    fn receive_action(
         &self,
     ) -> impl Future<Output = Result<Option<ActionData>, Self::Error>> + Send;
     fn close(&self) -> impl Future<Output = ()> + Send;
@@ -166,7 +166,7 @@ type DynError = dyn std::error::Error + Send + Sync + 'static;
 
 pub trait DynUserAgentTrait {
     fn send_update<'a>(&'a self, update: Update) -> BoxFuture<'a, Result<(), Box<DynError>>>;
-    fn receive_player_action<'a>(&'a self) -> BoxFuture<'a, Result<Option<ActionData>, Box<DynError>>>;
+    fn receive_action<'a>(&'a self) -> BoxFuture<'a, Result<Option<ActionData>, Box<DynError>>>;
     fn close<'a>(&'a self) -> BoxFuture<'a, ()>;
 }
 
@@ -179,8 +179,8 @@ where
         Box::pin(async move { self.send_update(update).await.map_err(Box::from) })
     }
 
-    fn receive_player_action<'a>(&'a self) -> BoxFuture<'a, Result<Option<ActionData>, Box<DynError>>> {
-        Box::pin(async move { self.receive_player_action().await.map_err(Box::from) })
+    fn receive_action<'a>(&'a self) -> BoxFuture<'a, Result<Option<ActionData>, Box<DynError>>> {
+        Box::pin(async move { self.receive_action().await.map_err(Box::from) })
     }
 
     fn close<'a>(&'a self) -> BoxFuture<'a, ()> {

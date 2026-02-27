@@ -1,0 +1,20 @@
+[package]
+name = "openplay-ua-http"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = { version = "0.7", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+futures = "0.3"
+tracing = "0.1"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+async-stream = "0.3"
+thiserror = "1.0"
+
+# Internal dependencies
+openplay-basic = { path = "../../models/basic" }
+async-trait = "0.1.89"

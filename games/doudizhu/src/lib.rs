@@ -11,7 +11,8 @@ use openplay_basic::game::{
 use openplay_basic::message::{App, DataType, TypedData};
 use openplay_basic::room::{RoomContext, RoomPlayerPosition, RoomView};
 use openplay_basic::user::{
-    Action as UserAction, ActionData as UserActionData, ActionSource, User,
+    game_action::GameActionData, Action as UserAction, ActionData as UserActionData, ActionSource,
+    User,
 };
 use openplay_poker::{Card, Deck};
 use rand::Rng;
@@ -52,7 +53,21 @@ pub struct LastPlay {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DouDizhuConfig {
+    pub turn_timeout_seconds: u64,
+}
+
+impl Default for DouDizhuConfig {
+    fn default() -> Self {
+        DouDizhuConfig {
+            turn_timeout_seconds: 30,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DouDizhuGame {
+    pub config: DouDizhuConfig,
     pub version: u32, // Optimistic locking version
     pub players: Vec<PlayerState>,
     pub deck: Deck,
@@ -109,6 +124,7 @@ impl DouDizhuGame {
             .collect();
 
         DouDizhuGame {
+            config: DouDizhuConfig::default(),
             version: 0,
             players: player_states,
             deck: Deck::new_with_jokers(),
@@ -175,7 +191,7 @@ impl DouDizhuGame {
         self.timer_id = Some(new_timer_id.clone());
         commands.push(GameCommand::CreateTimer {
             id: new_timer_id,
-            duration: Duration::from_secs(30),
+            duration: Duration::from_secs(self.config.turn_timeout_seconds),
         });
 
         commands
@@ -427,28 +443,12 @@ impl DouDizhuGame {
             return (vec![], vec![]);
         }
 
-        let action = match self.stage {
-            Stage::Bidding => Action::Bid { score: 0 }, // Pass
-            Stage::Playing => Action::Pass,             // Pass
-            _ => return (vec![], vec![]),
-        };
-
-        if self.stage == Stage::Playing {
-            if let Some(last) = &self.last_play {
-                if last.player_idx == self.current_turn {
-                    if let Some(lowest) = self.players[self.current_turn].hand.last() {
-                        return self.process_game_action(
-                            self.current_turn,
-                            Action::Play {
-                                cards: vec![*lowest],
-                            },
-                        );
-                    }
-                }
-            }
+        let current_player_id = self.players[self.current_turn].player.id.clone();
+        if let Some(action) = self.default_action(&current_player_id) {
+            self.handle_user_action(&RoomContext {}, action)
+        } else {
+            (vec![], vec![])
         }
-
-        self.process_game_action(self.current_turn, action)
     }
 
     pub fn start(&mut self) {
@@ -569,6 +569,70 @@ impl Game for DouDizhuGame {
         }
 
         self.make_update(ctx, events, commands)
+    }
+    fn default_action(&self, player_id: &openplay_basic::user::UserId) -> Option<UserAction> {
+        let player_idx = self
+            .players
+            .iter()
+            .position(|p| p.player.id == *player_id)?;
+        if player_idx != self.current_turn {
+            return None;
+        }
+
+        let action = match self.stage {
+            Stage::Bidding => Action::Bid { score: 0 },
+            Stage::Playing => {
+                let is_free_turn = if let Some(last) = &self.last_play {
+                    last.player_idx == self.current_turn
+                } else {
+                    true
+                };
+
+                if is_free_turn {
+                    if let Some(lowest) = self.players[self.current_turn].hand.last() {
+                        Action::Play {
+                            cards: vec![*lowest],
+                        }
+                    } else {
+                        return None;
+                    }
+                } else {
+                    Action::Pass
+                }
+            }
+            _ => return None,
+        };
+
+        // Wrap in UserAction
+        let json = serde_json::to_vec(&action).ok()?;
+        let typed_data = TypedData {
+            r#type: DataType {
+                app: get_app(),
+                r#type: "action".to_string(),
+            },
+            codec: "json".to_string(),
+            data: Data(Bytes::from(json)),
+        };
+
+        Some(UserAction {
+            source: ActionSource::User(player_id.clone()),
+            data: UserActionData::GameAction(GameActionData {
+                message: typed_data,
+                ref_version: self.version,
+            }),
+        })
+    }
+
+    fn apply_config(&mut self, config: TypedData) -> Result<(), String> {
+        if config.r#type.app.id != APP_ID || config.r#type.r#type != "config" {
+            return Err(format!("Invalid config type: {:?}", config.r#type));
+        }
+
+        let new_config: DouDizhuConfig = serde_json::from_slice(&config.data.0)
+            .map_err(|e| format!("Invalid config format: {}", e))?;
+
+        self.config = new_config;
+        Ok(())
     }
 }
 

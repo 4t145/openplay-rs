@@ -31,18 +31,29 @@ pub struct ConnectionBroadcastMessage {
     update: Update,
 }
 pub struct ConnectionContext {
-    pub player_agents: HashMap<UserId, DynUserAgent>,
+    pub user_agents: HashMap<UserId, DynUserAgent>,
     pub command_rx: tokio::sync::mpsc::Receiver<ConnectionCommand>,
 }
 
-pub struct ConnectionHandle {
+pub struct ConnectionController {
     command_tx: tokio::sync::mpsc::Sender<ConnectionCommand>,
+}
+
+impl Clone for ConnectionController {
+    fn clone(&self) -> Self {
+        Self {
+            command_tx: self.command_tx.clone(),
+        }
+    }
+}
+
+pub struct ConnectionHandle {
     ct: CancellationToken,
     task_handle: tokio::task::JoinHandle<()>,
 }
 
 pub enum ConnectionEvent {
-    PlayerDisconnected {
+    UserDisconnected {
         user_id: UserId,
         error: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
@@ -54,12 +65,9 @@ pub enum ConnectionHandleError {
     #[error("Command response error")]
     CommandResponseError,
 }
-impl ConnectionHandle {
-    pub async fn quit(self) {
-        self.ct.cancel();
-        let _ = self.task_handle.await;
-    }
-    pub async fn player_connect(
+
+impl ConnectionController {
+    pub async fn user_connect(
         &self,
         user_id: UserId,
         agent: DynUserAgent,
@@ -78,7 +86,7 @@ impl ConnectionHandle {
             .map_err(|_| ConnectionHandleError::CommandResponseError)?;
         Ok(())
     }
-    pub async fn player_disconnect(
+    pub async fn user_disconnect(
         &self,
         user_id: UserId,
     ) -> Result<Option<UaProxyQuitReason>, ConnectionHandleError> {
@@ -114,21 +122,29 @@ impl ConnectionHandle {
             .await
             .map_err(|_| ConnectionHandleError::CommandSendError)
     }
+}
+
+impl ConnectionHandle {
+    pub async fn quit(self) {
+        self.ct.cancel();
+        let _ = self.task_handle.await;
+    }
+    
     pub fn run(
-        player_agents: impl IntoIterator<Item = (UserId, DynUserAgent)> + Send + 'static,
-        player_event_tx: tokio::sync::mpsc::Sender<Action>,
-    ) -> ConnectionHandle {
+        user_agents: impl IntoIterator<Item = (UserId, DynUserAgent)> + Send + 'static,
+        user_event_tx: tokio::sync::mpsc::Sender<Action>,
+    ) -> (ConnectionHandle, ConnectionController) {
         let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::channel::<ConnectionCommand>(32);
         let ct = CancellationToken::new();
         let handle_ct = ct.clone();
         let task = async move {
-            let mut agents: HashMap<UserId, UaProxyHandle> = player_agents
+            let mut agents: HashMap<UserId, UaProxyHandle> = user_agents
                 .into_iter()
                 .map(|(user_id, agent)| {
                     let handle = UaProxyHandle::run(UaProxyContext {
                         user_id: user_id.clone(),
                         agent,
-                        player_event_tx: player_event_tx.clone(),
+                        user_event_tx: user_event_tx.clone(),
                     });
                     (user_id, handle)
                 })
@@ -156,12 +172,12 @@ impl ConnectionHandle {
                         agent,
                         responder,
                     }) => {
-                        tracing::info!("ConnectionHandle: Player {} connecting", user_id);
+                        tracing::info!("ConnectionHandle: User {} connecting", user_id);
                         // Handle new connection, e.g., by creating a new PlayerProxyHandle and adding it to the agents map.
                         let handle = UaProxyHandle::run(UaProxyContext {
                             user_id: user_id.clone(),
                             agent,
-                            player_event_tx: player_event_tx.clone(),
+                            user_event_tx: user_event_tx.clone(),
                         });
                         agents.insert(user_id, handle);
                         let _ = responder.send(());
@@ -170,7 +186,7 @@ impl ConnectionHandle {
                         user_id: user_id,
                         responder,
                     }) => {
-                        tracing::info!("ConnectionHandle: Player {} disconnecting", user_id);
+                        tracing::info!("ConnectionHandle: User {} disconnecting", user_id);
                         // Handle disconnection, e.g., by removing the PlayerProxyHandle from the agents map and quitting it.
                         let reason = if let Some(handle) = agents.remove(&user_id) {
                             let reason = handle.quit().await;
@@ -190,7 +206,7 @@ impl ConnectionHandle {
                             batch_send_join_set.spawn(async move {
                                 if let Err(e) = send_task.await {
                                     tracing::error!(
-                                        "Error sending room update to player {}: {:?}",
+                                        "Error sending room update to user {}: {:?}",
                                         user_id,
                                         e
                                     );
@@ -213,7 +229,7 @@ impl ConnectionHandle {
                             tokio::spawn(async move {
                                 if let Err(e) = send_task.await {
                                     tracing::error!(
-                                        "Error sending game view update to player {}: {:?}",
+                                        "Error sending game view update to user {}: {:?}",
                                         user_id,
                                         e
                                     );
@@ -221,7 +237,7 @@ impl ConnectionHandle {
                             });
                         } else {
                             tracing::warn!(
-                                "ConnectionHandle: Player {} not found for GameViewUpdate",
+                                "ConnectionHandle: User {} not found for GameViewUpdate",
                                 to
                             );
                         }
@@ -229,19 +245,21 @@ impl ConnectionHandle {
                 }
             }
         };
-        let handle = Self {
-            command_tx: cmd_tx,
+        let handle = ConnectionHandle {
             ct: handle_ct,
             task_handle: tokio::spawn(task),
         };
-        handle
+        let controller = ConnectionController {
+            command_tx: cmd_tx,
+        };
+        (handle, controller)
     }
 }
 
 pub struct UaProxyContext {
     user_id: UserId,
     agent: DynUserAgent,
-    player_event_tx: tokio::sync::mpsc::Sender<Action>,
+    user_event_tx: tokio::sync::mpsc::Sender<Action>,
 }   
 
 #[derive(Debug, thiserror::Error)]
@@ -305,9 +323,9 @@ impl UaProxyHandle {
         let UaProxyContext {
             user_id,
             agent,
-            player_event_tx,
+            user_event_tx,
         } = context;
-        let (proxy_room_event_tx, proxy_player_event_rx) =
+        let (proxy_room_event_tx, proxy_user_event_rx) =
             tokio::sync::mpsc::channel::<(Update, ResultResponder<(), UaProxyError>)>(32);
         let ct = tokio_util::sync::CancellationToken::new();
         let handle_ct = ct.clone();
@@ -315,12 +333,12 @@ impl UaProxyHandle {
             ReceiveUserAction(Action),
             SendUpdate(Update, ResultResponder<(), UaProxyError>),
         }
-        let mut message_rx = proxy_player_event_rx;
-        let message_tx = player_event_tx;
+        let mut message_rx = proxy_user_event_rx;
+        let message_tx = user_event_tx;
         let handle_user_id = user_id.clone();
         let task = async move {
             let quit_reason = loop {
-                // println!("PlayerProxy for {} loop start", handle_user_id);
+                // println!("UaProxy for {} loop start", handle_user_id);
                 let evt = tokio::select! {
                     biased; // Try biased to check if order matters, though usually random
                     _ = ct.cancelled() => {
@@ -335,9 +353,9 @@ impl UaProxyHandle {
                             }
                         }
                     }
-                    action = agent.receive_player_action(), if !ct.is_cancelled() => {
+                    action = agent.receive_action(), if !ct.is_cancelled() => {
                         match action {
-                            Ok(Some(player_action)) => Event::ReceiveUserAction(player_action.with_source(&user_id)),
+                            Ok(Some(user_action)) => Event::ReceiveUserAction(user_action.with_source(&user_id)),
                             Ok(None) => {
                                 // The agent has closed the connection.
                                 break UaProxyQuitReason::ReceiverClosed;
@@ -349,9 +367,9 @@ impl UaProxyHandle {
                     }
                 };
                 match evt {
-                    Event::ReceiveUserAction(player_action) => {
-                        // Forward the player action to the connection.
-                        if let Err(_) = message_tx.send(player_action).await {
+                    Event::ReceiveUserAction(user_action) => {
+                        // Forward the user action to the connection.
+                        if let Err(_) = message_tx.send(user_action).await {
                             // server closed
                             break UaProxyQuitReason::ServerClosed;
                         }
@@ -369,7 +387,7 @@ impl UaProxyHandle {
                 }
             };
             tracing::info!(
-                "PlayerAgentProxy for player {} disconnected: {:?}",
+                "UserAgentProxy for user {} disconnected: {:?}",
                 user_id,
                 quit_reason
             );

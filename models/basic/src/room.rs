@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    game::{GameUpdate, GameViewUpdate, Id},
+    game::GameViewUpdate,
     user::{User, UserId},
     Dtu,
 };
@@ -52,6 +52,8 @@ pub struct RoomInfo {
     pub id: String,
     pub owner: UserId,
     pub endpoint: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game_config: Option<crate::message::TypedData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

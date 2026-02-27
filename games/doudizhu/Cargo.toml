@@ -17,6 +17,6 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1.28", features = ["full"] }
 openplay-host = { path = "../../host" }
-openplay-pa-programmed = { path = "../../player-agents/programmed" }
+openplay-ua-programmed = { path = "../../user-agents/programmed" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
