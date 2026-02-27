@@ -14,7 +14,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use futures::{stream::Stream, StreamExt};
+use futures::{future::BoxFuture, stream::Stream, StreamExt};
 use openplay_basic::{
     room::Update,
     user::{ActionData, UserAgent, UserId},
@@ -22,7 +22,7 @@ use openplay_basic::{
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_stream::wrappers::BroadcastStream;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 /// Configuration for the HTTP agent.
 #[derive(Debug, Clone)]
@@ -47,13 +47,17 @@ impl Default for HttpUserAgentConfig {
 
 /// Trait defining the state requirements for the HTTP agent handlers.
 /// Implement this on your application state to integrate the agent handlers.
-#[async_trait::async_trait]
 pub trait HttpUserAgentState: Clone + Send + Sync + 'static {
     fn registry(&self) -> &Registry;
     fn config(&self) -> &HttpUserAgentConfig;
     /// Optional: Handle explicit disconnection request from the HTTP layer.
-    async fn disconnect(&self, _user_id: &UserId) -> Result<(), String> {
-        Ok(())
+    fn disconnect(&self, _user_id: &UserId) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+    /// Optional: Auto-connect a user when they attempt SSE but are not yet in the registry.
+    /// The implementation should create an HttpUserAgent, register it, and connect to the game.
+    fn connect(&self, _user_id: &UserId) -> BoxFuture<'static, Result<(), String>> {
+        Box::pin(async { Err("Auto-connect not supported".to_string()) })
     }
 }
 
@@ -157,7 +161,6 @@ pub struct DefaultUserAgentState {
     pub config: HttpUserAgentConfig,
 }
 
-#[async_trait::async_trait]
 impl HttpUserAgentState for DefaultUserAgentState {
     fn registry(&self) -> &Registry {
         &self.registry
@@ -169,6 +172,7 @@ impl HttpUserAgentState for DefaultUserAgentState {
 
 /// Handler for Server-Sent Events (SSE).
 /// Expects the UserId to be present in the request extensions (injected by auth middleware).
+/// If the user is not in the registry, attempts auto-connect via `state.connect()`.
 pub async fn sse_handler<S>(
     State(state): State<S>,
     Extension(user_id): Extension<UserId>,
@@ -179,14 +183,25 @@ where
     debug!("SSE connection request for user {}", user_id);
     let config = state.config();
 
-    let stream_rx = {
+    // Try to find the user in registry; if not found, attempt auto-connect
+    let mut stream_rx = {
         let reg = state.registry().read().unwrap();
-        if let Some(channels) = reg.get(&user_id) {
-            Some(channels.tx_update.subscribe())
-        } else {
-            None
-        }
+        reg.get(&user_id).map(|ch| ch.tx_update.subscribe())
     };
+
+    if stream_rx.is_none() {
+        debug!("User {} not in registry, attempting auto-connect", user_id);
+        match state.connect(&user_id).await {
+            Ok(()) => {
+                info!("Auto-connected user {}", user_id);
+                let reg = state.registry().read().unwrap();
+                stream_rx = reg.get(&user_id).map(|ch| ch.tx_update.subscribe());
+            }
+            Err(e) => {
+                warn!("Auto-connect failed for user {}: {}", user_id, e);
+            }
+        }
+    }
 
     let stream = async_stream::stream! {
         if let Some(rx) = stream_rx {
@@ -208,8 +223,8 @@ where
                  }
              }
         } else {
-             // User not found
-             warn!("User {} not found in registry for SSE", user_id);
+             warn!("User {} not found in registry for SSE (after auto-connect attempt)", user_id);
+             yield Ok(Event::default().event("error").data("user not registered"));
         }
     };
 
@@ -223,7 +238,7 @@ pub async fn action_handler<S>(
     State(state): State<S>,
     Extension(user_id): Extension<UserId>,
     Json(action_data): Json<ActionData>,
-) -> impl IntoResponse 
+) -> impl IntoResponse
 where
     S: HttpUserAgentState,
 {
@@ -269,7 +284,10 @@ where
             // Also cleanup channels if present
             let mut reg = state.registry().write().unwrap();
             if reg.remove(&user_id).is_some() {
-                debug!("Removed agent channels for user {} on explicit disconnect", user_id);
+                debug!(
+                    "Removed agent channels for user {} on explicit disconnect",
+                    user_id
+                );
             }
             (axum::http::StatusCode::OK, "Disconnected").into_response()
         }
@@ -298,7 +316,10 @@ pub fn router(registry: Registry) -> Router {
     Router::new()
         .route("/events", get(sse_handler::<DefaultUserAgentState>))
         .route("/action", post(action_handler::<DefaultUserAgentState>))
-        .route("/disconnect", axum::routing::delete(disconnect_handler::<DefaultUserAgentState>))
+        .route(
+            "/disconnect",
+            axum::routing::delete(disconnect_handler::<DefaultUserAgentState>),
+        )
         .with_state(state)
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())

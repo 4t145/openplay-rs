@@ -105,6 +105,19 @@ pub use room_update::*;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct RoomPlayerPosition(String);
 
+impl RoomPlayerPosition {
+    /// Access the inner position string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for RoomPlayerPosition {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 impl From<String> for RoomPlayerPosition {
     fn from(s: String) -> Self {
         RoomPlayerPosition(s)
@@ -151,10 +164,27 @@ pub enum RoomView {
     Neutral,
 }
 
-pub struct RoomContext {}
+pub struct RoomContext {
+    pub room: Room,
+}
 
 impl RoomContext {
-    pub fn get_room_info(&self) -> RoomInfo {
-        todo!()
+    pub fn new(room: Room) -> Self {
+        Self { room }
+    }
+
+    pub fn get_room_info(&self) -> &RoomInfo {
+        &self.room.info
+    }
+
+    pub fn get_room_state(&self) -> &RoomState {
+        &self.room.state
+    }
+
+    /// Get the list of players ordered by seat position (0, 1, 2, ...).
+    pub fn get_ordered_players(&self) -> Vec<User> {
+        let mut seats: Vec<_> = self.room.state.players.iter().collect();
+        seats.sort_by_key(|(pos, _)| pos.as_str().to_string());
+        seats.into_iter().map(|(_, ps)| ps.player.clone()).collect()
     }
 }

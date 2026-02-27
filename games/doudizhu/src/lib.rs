@@ -297,7 +297,7 @@ impl DouDizhuGame {
                             true
                         } else if self.highest_bid == 0 && self.consecutive_passes >= 3 {
                             // Redeal
-                            self.start(); // This resets state
+                            self.redeal(); // This resets state
                             return (vec![], self.start_turn_timer());
                         } else if self.highest_bid > 0 && self.consecutive_passes >= 2 {
                             true
@@ -433,6 +433,7 @@ impl DouDizhuGame {
 
     fn handle_timer_expired(
         &mut self,
+        ctx: &RoomContext,
         _timer: TimeExpired,
     ) -> (Vec<ClientEvent>, Vec<GameCommand>) {
         if let Some(current_timer) = &self.timer_id {
@@ -445,13 +446,56 @@ impl DouDizhuGame {
 
         let current_player_id = self.players[self.current_turn].player.id.clone();
         if let Some(action) = self.default_action(&current_player_id) {
-            self.handle_user_action(&RoomContext {}, action)
+            self.handle_user_action(ctx, action)
         } else {
             (vec![], vec![])
         }
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self, ctx: &RoomContext) {
+        // Populate players from room state (ordered by seat position)
+        let room_players = ctx.get_ordered_players();
+        if room_players.len() != 3 {
+            tracing::warn!(
+                "Cannot start: need exactly 3 players, got {}",
+                room_players.len()
+            );
+            return;
+        }
+
+        self.players = room_players
+            .into_iter()
+            .map(|p| PlayerState {
+                player: p,
+                hand: Vec::new(),
+                role: Role::Undecided,
+                has_passed: false,
+                bid_score: 0,
+            })
+            .collect();
+
+        self.deal_cards();
+
+        self.stage = Stage::Bidding;
+        self.current_turn = rand::rng().random_range(0..3);
+        self.highest_bid = 0;
+        self.base_score = 0;
+        self.consecutive_passes = 0;
+        self.multiplier = 1;
+        self.landlord_idx = None;
+        self.last_play = None;
+        self.winner = None;
+        self.version = 1;
+
+        for p in &mut self.players {
+            p.role = Role::Undecided;
+            p.bid_score = 0;
+            p.has_passed = false;
+        }
+    }
+
+    /// Redeal cards without changing the player list (used when all players pass during bidding).
+    fn redeal(&mut self) {
         if self.players.len() != 3 {
             return;
         }
@@ -467,7 +511,7 @@ impl DouDizhuGame {
         self.landlord_idx = None;
         self.last_play = None;
         self.winner = None;
-        self.version = 1;
+        self.version += 1;
 
         for p in &mut self.players {
             p.role = Role::Undecided;
@@ -534,14 +578,30 @@ impl Game for DouDizhuGame {
     fn handle_action(&mut self, ctx: &RoomContext, update: SequencedGameUpdate) -> GameUpdate {
         // Handle GameStart
         if let GameEvent::GameStart = update.event {
-            self.start();
+            self.start(ctx);
+            if self.stage != Stage::Bidding {
+                // start() failed (not enough players, etc.) — return empty update
+                tracing::warn!(
+                    "GameStart failed: stage is {:?}, players: {}",
+                    self.stage,
+                    self.players.len()
+                );
+                return GameUpdate {
+                    views: HashMap::new(),
+                    snapshot: GameState {
+                        version: self.version,
+                        data: self.snapshot(),
+                    },
+                    commands: vec![],
+                };
+            }
             let start_commands = self.start_turn_timer();
             return self.make_update(ctx, vec![], start_commands);
         }
 
         let (events, commands) = match update.event {
             GameEvent::Action(action) => self.handle_user_action(ctx, action),
-            GameEvent::TimerExpired(timer) => self.handle_timer_expired(timer),
+            GameEvent::TimerExpired(timer) => self.handle_timer_expired(ctx, timer),
             _ => (vec![], vec![]),
         };
 

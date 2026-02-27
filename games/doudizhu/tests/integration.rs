@@ -2,7 +2,7 @@ use bytes::Bytes;
 use openplay_basic::data::Data;
 use openplay_basic::game::{Game, GameEvent, SequencedGameUpdate};
 use openplay_basic::message::{App, DataType, TypedData};
-use openplay_basic::room::RoomContext;
+use openplay_basic::room::{Room, RoomContext, RoomInfo, RoomPlayerPosition, RoomPlayerState};
 use openplay_basic::user::{
     game_action::GameActionData, Action as UserAction, ActionData as UserActionData, ActionSource,
     User, UserId,
@@ -48,6 +48,31 @@ fn get_state(update: &openplay_basic::game::GameUpdate) -> DouDizhuGame {
     serde_json::from_slice(&update.snapshot.data.data.0).unwrap()
 }
 
+/// Create a RoomContext with the given players seated at positions 0, 1, 2.
+fn make_room_context(players: &[User]) -> RoomContext {
+    let owner = players[0].clone();
+    let room_info = RoomInfo {
+        title: "Test Room".to_string(),
+        description: None,
+        id: "test".to_string(),
+        owner: owner.id.clone(),
+        endpoint: "test://".to_string(),
+        game_config: None,
+    };
+    let mut room = Room::new(room_info, owner);
+    for (i, p) in players.iter().enumerate() {
+        room.state.players.insert(
+            RoomPlayerPosition::from(i.to_string()),
+            RoomPlayerState {
+                id_ready: true,
+                is_connected: true,
+                player: p.clone(),
+            },
+        );
+    }
+    RoomContext::new(room)
+}
+
 #[test]
 fn test_game_flow() {
     let p1 = create_player(1, "Alice");
@@ -55,10 +80,10 @@ fn test_game_flow() {
     let p3 = create_player(3, "Charlie");
 
     let mut game = DouDizhuGame::new(vec![p1.clone(), p2.clone(), p3.clone()]);
-    let ctx = RoomContext {};
+    let ctx = make_room_context(&[p1.clone(), p2.clone(), p3.clone()]);
 
     // Start game
-    game.start(); // Helper
+    game.start(&ctx);
 
     // We need to inspect state to proceed
     // We can just use game directly since it's local

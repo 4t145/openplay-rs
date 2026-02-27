@@ -6,6 +6,9 @@ Answer user's question in what language they ask with.
 
 尽量使用2024版本的rust风格，尽量避免魔法值，对于返回Error的类型，在注释的`#ERROR`章节说明错误可能产生的原因。
 
+## 组织项目结构
+不要使用`mod.rs`，而是使用`xxx.rs`，并建立`xxx`文件夹，这样的项目更好组织，也是最新的rust推荐方式
+
 ## axum http handler 集成规范：基于 Trait 的状态注入 (State Injection)
 
 为了确保 user-agents 能够在不同的 Axum 应用中复用并保持高度的可配置性，我们遵循以下集成规范。

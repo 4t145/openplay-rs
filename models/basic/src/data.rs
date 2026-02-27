@@ -1,6 +1,6 @@
-use std::ops::{Deref, DerefMut};
-
+use base64::prelude::*;
 use bytes::Bytes;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Data(pub Bytes);
@@ -10,7 +10,14 @@ impl serde::Serialize for Data {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_bytes(&self.0)
+        if serializer.is_human_readable() {
+            // For human-readable formats, encode as base64 string
+            let encoded = BASE64_STANDARD.encode(&self.0);
+            serializer.serialize_str(&encoded)
+        } else {
+            // For binary formats, serialize as bytes
+            serializer.serialize_bytes(&self.0)
+        }
     }
 }
 
@@ -19,8 +26,18 @@ impl<'de> serde::Deserialize<'de> for Data {
     where
         D: serde::Deserializer<'de>,
     {
-        let bytes = <&[u8]>::deserialize(deserializer)?;
-        Ok(Data(Bytes::copy_from_slice(bytes)))
+        if deserializer.is_human_readable() {
+            // For human-readable formats, expect a base64 string
+            let s = String::deserialize(deserializer)?;
+            let decoded = BASE64_STANDARD
+                .decode(s.as_bytes())
+                .map_err(serde::de::Error::custom)?;
+            Ok(Data(Bytes::from(decoded)))
+        } else {
+            // For binary formats, deserialize as bytes
+            let bytes = Vec::<u8>::deserialize(deserializer)?;
+            Ok(Data(Bytes::from(bytes)))
+        }
     }
 }
 

@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::Ordering,
         Arc,
     },
     time::Duration,
@@ -14,7 +14,7 @@ use openplay_basic::{
     message::{DataType, TypedData},
     room::{Room, RoomEvent, RoomInfo, Update},
     user::{
-        room_action::{ReadyStateChange, RoomActionData},
+        room_action::{ReadyStateChange, RoomActionData, RoomManage},
         ActionData, DynUserAgent, User, UserAgent, UserId,
     },
 };
@@ -76,14 +76,15 @@ impl UserProgram for DouDizhuBot {
 
 struct StartGameAgent {
     inner: ProgrammedUserAgent,
-    started: AtomicBool,
+    /// 0 = not started, 1 = sent ready, 2 = sent start game
+    step: std::sync::atomic::AtomicU8,
 }
 
 impl StartGameAgent {
     fn new(inner: ProgrammedUserAgent) -> Self {
         Self {
             inner,
-            started: AtomicBool::new(false),
+            step: std::sync::atomic::AtomicU8::new(0),
         }
     }
 }
@@ -102,12 +103,21 @@ impl UserAgent for StartGameAgent {
         &self,
     ) -> impl std::future::Future<Output = Result<Option<ActionData>, Self::Error>> + Send {
         async move {
-            if !self.started.load(Ordering::Relaxed) {
+            let current = self.step.load(Ordering::Relaxed);
+            if current == 0 {
                 info!("StartGameAgent sending Ready event");
-                self.started.store(true, Ordering::Relaxed);
-                // Send Ready State Change
+                self.step.store(1, Ordering::Relaxed);
                 return Ok(Some(ActionData::RoomAction(
                     RoomActionData::ChangeReadyState(ReadyStateChange { is_ready: true }),
+                )));
+            }
+            if current == 1 {
+                // Small delay to let the ready state propagate
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                info!("StartGameAgent sending StartGame");
+                self.step.store(2, Ordering::Relaxed);
+                return Ok(Some(ActionData::RoomAction(
+                    RoomActionData::RoomManage(RoomManage::StartGame),
                 )));
             }
             self.inner.receive_action().await
@@ -211,6 +221,7 @@ async fn test_service_integration() {
         game: Box::new(game),
         room,
         user_agents,
+        bot_factory: None,
     };
 
     // 5. Run

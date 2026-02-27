@@ -2,7 +2,7 @@ use bytes::Bytes;
 use openplay_basic::data::Data;
 use openplay_basic::game::{Game, GameEvent, SequencedGameUpdate};
 use openplay_basic::message::{App, DataType, TypedData};
-use openplay_basic::room::RoomContext;
+use openplay_basic::room::{Room, RoomContext, RoomInfo, RoomPlayerPosition, RoomPlayerState};
 use openplay_basic::user::{
     game_action::GameActionData, Action as UserAction, ActionData as UserActionData, ActionSource,
     User, UserId,
@@ -51,6 +51,31 @@ fn card(rank: Rank) -> Card {
     })
 }
 
+/// Create a RoomContext with the given players seated at positions 0, 1, 2.
+fn make_room_context(players: &[User]) -> RoomContext {
+    let owner = players[0].clone();
+    let room_info = RoomInfo {
+        title: "Test Room".to_string(),
+        description: None,
+        id: "test".to_string(),
+        owner: owner.id.clone(),
+        endpoint: "test://".to_string(),
+        game_config: None,
+    };
+    let mut room = Room::new(room_info, owner);
+    for (i, p) in players.iter().enumerate() {
+        room.state.players.insert(
+            RoomPlayerPosition::from(i.to_string()),
+            RoomPlayerState {
+                id_ready: true,
+                is_connected: true,
+                player: p.clone(),
+            },
+        );
+    }
+    RoomContext::new(room)
+}
+
 // Helper to extract state from GameUpdate
 fn get_state(update: &openplay_basic::game::GameUpdate) -> DouDizhuGame {
     serde_json::from_slice(&update.snapshot.data.data.0).unwrap()
@@ -74,7 +99,7 @@ fn test_invalid_move_rejected() {
     // Give specific cards to p1
     game.players[0].hand = vec![card(Rank::Three), card(Rank::Four), card(Rank::Five)];
 
-    let ctx = RoomContext {};
+    let ctx = make_room_context(&[p1, p2, p3]);
 
     // 2. Attempt to play cards not in hand
     let action = Action::Play {
@@ -129,8 +154,9 @@ fn test_pass_logic() {
     let p2 = make_player("p2");
     let p3 = make_player("p3");
 
-    let mut game = DouDizhuGame::new(vec![p1, p2, p3]);
-    game.start(); // Helper to init deck etc
+    let mut game = DouDizhuGame::new(vec![p1.clone(), p2.clone(), p3.clone()]);
+    let ctx = make_room_context(&[p1, p2, p3]);
+    game.start(&ctx); // Helper to init deck etc
 
     // Override for specific test scenario
     game.stage = Stage::Playing;
@@ -139,8 +165,6 @@ fn test_pass_logic() {
     game.players[1].hand = vec![card(Rank::Four)];
     game.players[2].hand = vec![card(Rank::Five)];
     game.version = 10; // Arbitrary start
-
-    let ctx = RoomContext {};
 
     // p1 plays 3
     let update = game.handle_action(
@@ -178,12 +202,14 @@ fn test_pass_logic() {
 #[test]
 fn test_optimistic_locking() {
     let p1 = make_player("p1");
-    let mut game = DouDizhuGame::new(vec![p1.clone(), make_player("p2"), make_player("p3")]);
+    let p2 = make_player("p2");
+    let p3 = make_player("p3");
+    let mut game = DouDizhuGame::new(vec![p1.clone(), p2.clone(), p3.clone()]);
     game.stage = Stage::Playing;
     game.players[0].hand = vec![card(Rank::Three)];
     game.version = 5;
 
-    let ctx = RoomContext {};
+    let ctx = make_room_context(&[p1, p2, p3]);
 
     // Attempt action with stale version (4)
     let action = Action::Play {

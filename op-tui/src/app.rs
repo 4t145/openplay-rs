@@ -1,0 +1,620 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use openplay_basic::{
+    data::Data,
+    message::TypedData,
+    room::{Room, RoomObserverView, RoomPlayerPosition, RoomUserPosition, Update},
+    user::{
+        game_action::GameActionData,
+        room_action::{
+            AddBot, KickOut, PositionChange, ReadyStateChange, RoomActionData, RoomManage,
+        },
+        ActionData,
+    },
+};
+use openplay_doudizhu::{self as ddz, DouDizhuGame};
+use openplay_poker::Card;
+
+use crate::client::GameClient;
+use crate::log_buffer::LogBuffer;
+
+/// What the main loop should do after handling a key event.
+pub enum KeyAction {
+    /// No action needed.
+    None,
+    /// Send this action to the server.
+    SendAction(ActionData),
+    /// User wants to connect from the lobby (Enter pressed).
+    Connect,
+    /// User wants to cancel connecting or disconnect from game.
+    Disconnect,
+    /// User wants to quit the application.
+    Quit,
+}
+
+/// Top-level screen state.
+pub enum Screen {
+    Lobby(LobbyState),
+    Connecting,
+    Game(GameState),
+}
+
+/// Log panel display mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LogMode {
+    /// Log panel hidden.
+    Off,
+    /// Log panel shown at the bottom (1/3 height).
+    Panel,
+    /// Log panel covers the entire screen.
+    Fullscreen,
+}
+
+/// Lobby: user inputs server URL and user ID to connect.
+pub struct LobbyState {
+    pub server_url: String,
+    pub user_id: String,
+    /// Which field is focused: 0 = server_url, 1 = user_id
+    pub focus: usize,
+    pub error_message: Option<String>,
+}
+
+/// In-game state.
+pub struct GameState {
+    /// Latest decoded doudizhu game snapshot (masked for this player).
+    pub game: Option<DouDizhuGame>,
+    /// Current game state version (for optimistic locking on actions).
+    pub version: u32,
+    /// Room info.
+    pub room: Option<Room>,
+    /// Our player index in the game (0-2), determined by matching user_id.
+    pub my_index: Option<usize>,
+    /// Currently selected card indices (in hand).
+    pub selected: Vec<usize>,
+    /// Cursor position in hand.
+    pub cursor: usize,
+    /// Whether we are in "bid mode" (pressed B, waiting for 0-3).
+    pub bid_mode: bool,
+    /// Whether we are in "add bot mode" (pressed A, waiting for 1-3).
+    pub add_bot_mode: bool,
+    /// Whether we are in "kick mode" (pressed K, waiting for 1-3).
+    pub kick_mode: bool,
+    /// Event/message log for display.
+    pub messages: Vec<String>,
+    /// Our user_id string for matching.
+    pub my_user_id: String,
+}
+
+impl GameState {
+    pub fn new(user_id: &str) -> Self {
+        Self {
+            game: None,
+            version: 0,
+            room: None,
+            my_index: None,
+            selected: Vec::new(),
+            cursor: 0,
+            bid_mode: false,
+            add_bot_mode: false,
+            kick_mode: false,
+            messages: Vec::new(),
+            my_user_id: user_id.to_string(),
+        }
+    }
+
+    /// Determine our player index from the game state by matching user_id.
+    fn detect_my_index(&mut self) {
+        if let Some(ref game) = self.game {
+            for (i, ps) in game.players.iter().enumerate() {
+                // UserId now serializes as a JSON string
+                let player_id_str: String = serde_json::to_value(&ps.player.id)
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .unwrap_or_default();
+
+                if player_id_str == self.my_user_id {
+                    self.my_index = Some(i);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Get our hand cards (if we are a player and game is active).
+    pub fn my_hand(&self) -> &[Card] {
+        if let (Some(idx), Some(ref game)) = (self.my_index, &self.game) {
+            if idx < game.players.len() {
+                return &game.players[idx].hand;
+            }
+        }
+        &[]
+    }
+
+    /// Is it currently our turn?
+    pub fn is_my_turn(&self) -> bool {
+        match (self.my_index, &self.game) {
+            (Some(idx), Some(game)) => game.current_turn == idx,
+            _ => false,
+        }
+    }
+
+    /// Push a message to the log (keep last 50).
+    pub fn push_message(&mut self, msg: String) {
+        self.messages.push(msg);
+        if self.messages.len() > 50 {
+            self.messages.remove(0);
+        }
+    }
+
+    /// Check if the current user is ready (as a seated player in the room).
+    /// Returns None if user is not seated or no room info.
+    pub fn my_ready_state(&self) -> Option<bool> {
+        let room = self.room.as_ref()?;
+        for ps in room.state.players.values() {
+            // UserId now serializes as a JSON string
+            let player_id_str: String = serde_json::to_value(&ps.player.id)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_default();
+            if player_id_str == self.my_user_id {
+                return Some(ps.id_ready);
+            }
+        }
+        None
+    }
+}
+
+/// The main application state.
+pub struct App {
+    pub screen: Screen,
+    pub client: Option<GameClient>,
+    /// User ID for the pending/active connection, stored so we can transition
+    /// from Connecting -> Game when ServerConnected arrives.
+    pub pending_user_id: Option<String>,
+    /// In-memory log buffer for the TUI log panel.
+    pub log_buffer: LogBuffer,
+    /// Current log panel display mode.
+    pub log_mode: LogMode,
+    /// Scroll offset for fullscreen log view (0 = bottom / most recent).
+    pub log_scroll: usize,
+}
+
+impl App {
+    pub fn new(server_url: String, user_id: Option<String>, log_buffer: LogBuffer) -> Self {
+        Self {
+            screen: Screen::Lobby(LobbyState {
+                server_url,
+                user_id: user_id.unwrap_or_default(),
+                focus: 1,
+                error_message: None,
+            }),
+            client: None,
+            pending_user_id: None,
+            log_buffer,
+            log_mode: LogMode::Off,
+            log_scroll: 0,
+        }
+    }
+
+    /// Process a server update.
+    pub fn handle_server_update(&mut self, update: Update) {
+        let Screen::Game(ref mut gs) = self.screen else {
+            return;
+        };
+
+        match update {
+            Update::Room(room_update) => {
+                gs.room = Some(room_update.room);
+                for event in &room_update.events {
+                    gs.push_message(format!("{:?}", event));
+                }
+            }
+            Update::GameView(gv_update) => {
+                gs.version = gv_update.new_view.version;
+
+                if let Some(game) = decode_doudizhu_state(&gv_update.new_view.data) {
+                    gs.game = Some(game);
+                    gs.detect_my_index();
+
+                    // Reset selection when game state changes
+                    gs.selected.clear();
+                    let hand_len = gs.my_hand().len();
+                    if gs.cursor >= hand_len && hand_len > 0 {
+                        gs.cursor = hand_len - 1;
+                    }
+                }
+
+                for event in &gv_update.events {
+                    gs.push_message(format!("Game event seq={}", event.seq));
+                }
+            }
+        }
+    }
+
+    /// Handle a key event and return what the main loop should do.
+    pub fn handle_key(&mut self, key: KeyEvent) -> KeyAction {
+        // Global: Ctrl+C always quits
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::Quit;
+        }
+
+        // Global: F12 toggles log panel mode (Off -> Panel -> Fullscreen -> Off)
+        if key.code == KeyCode::F(12) {
+            self.log_mode = match self.log_mode {
+                LogMode::Off => LogMode::Panel,
+                LogMode::Panel => LogMode::Fullscreen,
+                LogMode::Fullscreen => LogMode::Off,
+            };
+            self.log_scroll = 0;
+            return KeyAction::None;
+        }
+
+        // Fullscreen log mode intercepts navigation keys
+        if self.log_mode == LogMode::Fullscreen {
+            match key.code {
+                KeyCode::Esc => {
+                    self.log_mode = LogMode::Off;
+                    self.log_scroll = 0;
+                    return KeyAction::None;
+                }
+                KeyCode::Up => {
+                    self.log_scroll = self.log_scroll.saturating_add(1);
+                    return KeyAction::None;
+                }
+                KeyCode::Down => {
+                    self.log_scroll = self.log_scroll.saturating_sub(1);
+                    return KeyAction::None;
+                }
+                KeyCode::Home => {
+                    // Scroll to oldest
+                    self.log_scroll = self.log_buffer.len().saturating_sub(1);
+                    return KeyAction::None;
+                }
+                KeyCode::End => {
+                    // Scroll to newest
+                    self.log_scroll = 0;
+                    return KeyAction::None;
+                }
+                _ => {
+                    // Ignore other keys in fullscreen log mode
+                    return KeyAction::None;
+                }
+            }
+        }
+
+        match &mut self.screen {
+            Screen::Lobby(lobby) => {
+                match key.code {
+                    KeyCode::Enter => {
+                        if !lobby.server_url.is_empty() && !lobby.user_id.is_empty() {
+                            return KeyAction::Connect;
+                        }
+                    }
+                    _ => handle_lobby_key(lobby, key),
+                }
+                KeyAction::None
+            }
+            Screen::Connecting => {
+                // Esc or Q cancels connecting
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => KeyAction::Disconnect,
+                    _ => KeyAction::None,
+                }
+            }
+            Screen::Game(gs) => handle_game_key(gs, key),
+        }
+    }
+
+    /// Transition to connecting state, returning (server_url, user_id) for the caller to initiate.
+    pub fn start_connect(&mut self) -> Option<(String, String)> {
+        if let Screen::Lobby(ref lobby) = self.screen {
+            if lobby.server_url.is_empty() || lobby.user_id.is_empty() {
+                return None;
+            }
+            let result = (lobby.server_url.clone(), lobby.user_id.clone());
+            self.pending_user_id = Some(lobby.user_id.clone());
+            self.screen = Screen::Connecting;
+            Some(result)
+        } else {
+            None
+        }
+    }
+
+    /// SSE connection confirmed open. Transition from Connecting -> Game.
+    pub fn connected(&mut self) {
+        if let Some(user_id) = self.pending_user_id.take() {
+            self.screen = Screen::Game(GameState::new(&user_id));
+        }
+    }
+
+    /// Handle connection failure, go back to lobby with error message.
+    pub fn connection_failed(&mut self, error: String) {
+        self.pending_user_id = None;
+        self.screen = Screen::Lobby(LobbyState {
+            server_url: String::new(),
+            user_id: String::new(),
+            focus: 0,
+            error_message: Some(error),
+        });
+    }
+
+    /// Cancel an in-progress connection or disconnect from game. Returns to lobby.
+    pub fn go_to_lobby(&mut self, error: Option<String>) {
+        self.pending_user_id = None;
+        self.client = None;
+        self.screen = Screen::Lobby(LobbyState {
+            server_url: String::new(),
+            user_id: String::new(),
+            focus: 0,
+            error_message: error,
+        });
+    }
+}
+
+/// Handle key input on the lobby screen.
+fn handle_lobby_key(lobby: &mut LobbyState, key: KeyEvent) {
+    match key.code {
+        KeyCode::Tab => {
+            lobby.focus = (lobby.focus + 1) % 2;
+        }
+        KeyCode::BackTab => {
+            lobby.focus = if lobby.focus == 0 { 1 } else { 0 };
+        }
+        KeyCode::Char(c) => {
+            let field = if lobby.focus == 0 {
+                &mut lobby.server_url
+            } else {
+                &mut lobby.user_id
+            };
+            field.push(c);
+        }
+        KeyCode::Backspace => {
+            let field = if lobby.focus == 0 {
+                &mut lobby.server_url
+            } else {
+                &mut lobby.user_id
+            };
+            field.pop();
+        }
+        _ => {}
+    }
+}
+
+/// Handle key input on the game screen. Returns what the main loop should do.
+fn handle_game_key(gs: &mut GameState, key: KeyEvent) -> KeyAction {
+    // Q or Esc: disconnect and return to lobby
+    if key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q') || key.code == KeyCode::Esc
+    {
+        // Don't intercept Q/Esc while in a sub-mode — cancel the mode instead
+        if gs.bid_mode {
+            gs.bid_mode = false;
+            return KeyAction::None;
+        }
+        if gs.add_bot_mode {
+            gs.add_bot_mode = false;
+            return KeyAction::None;
+        }
+        if gs.kick_mode {
+            gs.kick_mode = false;
+            return KeyAction::None;
+        }
+        return KeyAction::Disconnect;
+    }
+
+    // Bid mode: B was pressed, waiting for 0-3
+    if gs.bid_mode {
+        gs.bid_mode = false;
+        match key.code {
+            KeyCode::Char(c @ '0'..='3') => {
+                let score = c.to_digit(10).unwrap() as u8;
+                return KeyAction::SendAction(make_game_action(
+                    ddz::Action::Bid { score },
+                    gs.version,
+                ));
+            }
+            _ => return KeyAction::None, // Cancel bid mode
+        }
+    }
+
+    // Add-bot mode: A was pressed, waiting for 1-3
+    if gs.add_bot_mode {
+        gs.add_bot_mode = false;
+        match key.code {
+            KeyCode::Char(c @ '1'..='3') => {
+                let seat = (c.to_digit(10).unwrap() - 1).to_string();
+                return KeyAction::SendAction(ActionData::RoomAction(RoomActionData::RoomManage(
+                    RoomManage::AddBot(AddBot {
+                        position: RoomPlayerPosition::from(seat.as_str()),
+                        name: None,
+                    }),
+                )));
+            }
+            _ => return KeyAction::None,
+        }
+    }
+
+    // Kick mode: K was pressed, waiting for 1-3
+    if gs.kick_mode {
+        gs.kick_mode = false;
+        match key.code {
+            KeyCode::Char(c @ '1'..='3') => {
+                let seat = (c.to_digit(10).unwrap() - 1).to_string();
+                let pos = RoomPlayerPosition::from(seat.as_str());
+                // Find the player at this seat
+                if let Some(ref room) = gs.room {
+                    if let Some(player_state) = room.state.players.get(&pos) {
+                        return KeyAction::SendAction(ActionData::RoomAction(
+                            RoomActionData::RoomManage(RoomManage::KickOut(KickOut {
+                                player: player_state.player.id.clone(),
+                                reason: None,
+                                ban: None,
+                            })),
+                        ));
+                    }
+                }
+                return KeyAction::None;
+            }
+            _ => return KeyAction::None,
+        }
+    }
+
+    // --- Waiting phase (no game yet): room management keys ---
+    if gs.game.is_none() {
+        match key.code {
+            // 1-3: sit at seat (observer -> player)
+            KeyCode::Char(c @ '1'..='3') => {
+                let seat = (c.to_digit(10).unwrap() - 1).to_string();
+                return KeyAction::SendAction(ActionData::RoomAction(
+                    RoomActionData::PositionChange(PositionChange {
+                        from: RoomUserPosition::Observer(RoomObserverView::default()),
+                        to: RoomUserPosition::Player(RoomPlayerPosition::from(seat.as_str())),
+                    }),
+                ));
+            }
+
+            // A: enter add-bot mode
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                gs.add_bot_mode = true;
+            }
+
+            // K: enter kick mode
+            KeyCode::Char('k') | KeyCode::Char('K') => {
+                gs.kick_mode = true;
+            }
+
+            // Ready toggle
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                let new_ready = !gs.my_ready_state().unwrap_or(false);
+                return KeyAction::SendAction(ActionData::RoomAction(
+                    RoomActionData::ChangeReadyState(ReadyStateChange {
+                        is_ready: new_ready,
+                    }),
+                ));
+            }
+
+            // S: start game (owner only, server validates)
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                return KeyAction::SendAction(ActionData::RoomAction(RoomActionData::RoomManage(
+                    RoomManage::StartGame,
+                )));
+            }
+
+            _ => {}
+        }
+        return KeyAction::None;
+    }
+
+    // --- Active game phase ---
+    match key.code {
+        // Ready toggle (also available during game for re-match scenarios)
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            let new_ready = !gs.my_ready_state().unwrap_or(false);
+            return KeyAction::SendAction(ActionData::RoomAction(
+                RoomActionData::ChangeReadyState(ReadyStateChange {
+                    is_ready: new_ready,
+                }),
+            ));
+        }
+
+        // Enter bid mode
+        KeyCode::Char('b') | KeyCode::Char('B') => {
+            if let Some(ref game) = gs.game {
+                if matches!(game.stage, ddz::Stage::Bidding) && gs.is_my_turn() {
+                    gs.bid_mode = true;
+                }
+            }
+        }
+
+        // Navigate hand
+        KeyCode::Left => {
+            if gs.cursor > 0 {
+                gs.cursor -= 1;
+            }
+        }
+        KeyCode::Right => {
+            let hand_len = gs.my_hand().len();
+            if hand_len > 0 && gs.cursor < hand_len - 1 {
+                gs.cursor += 1;
+            }
+        }
+
+        // Toggle card selection
+        KeyCode::Char(' ') => {
+            let hand_len = gs.my_hand().len();
+            if gs.cursor < hand_len {
+                if let Some(pos) = gs.selected.iter().position(|&i| i == gs.cursor) {
+                    gs.selected.remove(pos);
+                } else {
+                    gs.selected.push(gs.cursor);
+                }
+            }
+        }
+
+        // Play selected cards
+        KeyCode::Enter => {
+            if gs.is_my_turn() && !gs.selected.is_empty() {
+                if let Some(ref game) = gs.game {
+                    if matches!(game.stage, ddz::Stage::Playing) {
+                        let hand = gs.my_hand();
+                        let cards: Vec<Card> = gs
+                            .selected
+                            .iter()
+                            .filter_map(|&i| hand.get(i).cloned())
+                            .collect();
+                        gs.selected.clear();
+                        return KeyAction::SendAction(make_game_action(
+                            ddz::Action::Play { cards },
+                            gs.version,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Pass
+        KeyCode::Char('p') | KeyCode::Char('P') => {
+            if gs.is_my_turn() {
+                if let Some(ref game) = gs.game {
+                    if matches!(game.stage, ddz::Stage::Playing) {
+                        return KeyAction::SendAction(make_game_action(
+                            ddz::Action::Pass,
+                            gs.version,
+                        ));
+                    }
+                }
+            }
+        }
+
+        _ => {}
+    }
+
+    KeyAction::None
+}
+
+/// Decode DouDizhuGame from a TypedData envelope.
+fn decode_doudizhu_state(typed_data: &TypedData) -> Option<DouDizhuGame> {
+    let bytes: &[u8] = &typed_data.data.0;
+    match serde_json::from_slice::<DouDizhuGame>(bytes) {
+        Ok(game) => Some(game),
+        Err(e) => {
+            tracing::warn!("Failed to decode doudizhu state: {}", e);
+            None
+        }
+    }
+}
+
+/// Construct a GameAction ActionData from a doudizhu Action.
+fn make_game_action(action: ddz::Action, ref_version: u32) -> ActionData {
+    let action_json = serde_json::to_vec(&action).expect("Failed to serialize action");
+    let message = TypedData {
+        r#type: openplay_basic::message::DataType {
+            app: ddz::get_app(),
+            r#type: "action".to_string(),
+        },
+        codec: "json".to_string(),
+        data: Data(bytes::Bytes::from(action_json)),
+    };
+    ActionData::GameAction(GameActionData {
+        message,
+        ref_version,
+    })
+}

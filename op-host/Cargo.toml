@@ -21,9 +21,9 @@ futures = "0.3"
 openplay-basic = { path = "../models/basic" }
 openplay-host = { path = "../host" }
 openplay-ua-http = { path = "../user-agents/http" }
+openplay-ua-programmed = { path = "../user-agents/programmed" }
 openplay-doudizhu = { path = "../games/doudizhu" }
 bytes = "1.11.1"
 config = "0.15.19"
 
 [dev-dependencies]
-openplay-ua-programmed = { path = "../user-agents/programmed" }

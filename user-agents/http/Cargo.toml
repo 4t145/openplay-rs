@@ -17,4 +17,3 @@ thiserror = "1.0"
 
 # Internal dependencies
 openplay-basic = { path = "../../models/basic" }
-async-trait = "0.1.89"

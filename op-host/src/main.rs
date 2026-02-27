@@ -1,13 +1,19 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use bytes::Bytes;
 use clap::Parser;
 use config::{Config, Environment, File};
 use op_host::{run_server, RoomServer};
+use openplay_basic::data::Data;
+use openplay_basic::game::GameViewUpdate;
+use openplay_basic::message::{DataType, TypedData};
 use openplay_basic::room::{Room, RoomInfo};
-use openplay_basic::user::{User, UserId};
+use openplay_basic::user::{new_dyn_user_agent, DynUserAgent, User, UserId};
 use openplay_doudizhu::DouDizhuGame;
-use openplay_host::service::RoomService;
+use openplay_host::service::{BotFactory, RoomService};
+use openplay_ua_programmed::{ProgrammedUserAgent, UserProgram};
 use serde::Deserialize;
-use std::net::{IpAddr, SocketAddr};
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -45,7 +51,7 @@ struct Args {
     #[arg(long)]
     owner_id: Option<String>,
 
-    /// Room Owner Name (for bot user)
+    /// Room Owner Display Name
     #[arg(long)]
     owner_name: Option<String>,
 
@@ -76,12 +82,81 @@ impl Default for ServerConfig {
             room_id: "room-1".to_string(),
             title: "OpenPlay Room".to_string(),
             description: Some("A default OpenPlay room".to_string()),
-            owner_id: "system".to_string(),
-            owner_name: "System".to_string(),
+            owner_id: "alice".to_string(),
+            owner_name: "Alice".to_string(),
             endpoint: None,
         }
     }
 }
+
+// --- Doudizhu Bot Infrastructure ---
+
+/// A `UserProgram` that uses `SimpleBotLogic` to decide doudizhu actions.
+struct DoudizhuBotProgram {
+    player_id: UserId,
+}
+
+impl UserProgram for DoudizhuBotProgram {
+    fn decide(&self, update: &GameViewUpdate) -> Option<TypedData> {
+        let game: DouDizhuGame = match serde_json::from_slice(&update.new_view.data.data.0) {
+            Ok(g) => g,
+            Err(e) => {
+                tracing::warn!("Bot failed to decode game state: {}", e);
+                return None;
+            }
+        };
+
+        if matches!(game.stage, openplay_doudizhu::Stage::Finished) {
+            return None;
+        }
+
+        if let Some(action) = openplay_doudizhu::bot::SimpleBotLogic::decide(&self.player_id, &game) {
+            let json = serde_json::to_string(&action).ok()?;
+            Some(TypedData {
+                r#type: DataType {
+                    app: openplay_doudizhu::get_app(),
+                    r#type: "action".to_string(),
+                },
+                codec: "json".to_string(),
+                data: Data(Bytes::from(json)),
+            })
+        } else {
+            None
+        }
+    }
+}
+
+/// Factory that creates doudizhu bot agents.
+struct DoudizhuBotFactory {
+    bot_counter: AtomicU32,
+}
+
+impl DoudizhuBotFactory {
+    fn new() -> Self {
+        Self {
+            bot_counter: AtomicU32::new(1),
+        }
+    }
+}
+
+impl BotFactory for DoudizhuBotFactory {
+    fn create_bot(&self, name: Option<String>) -> (User, DynUserAgent) {
+        let n = self.bot_counter.fetch_add(1, Ordering::Relaxed);
+        let bot_name = name.unwrap_or_else(|| format!("Bot-{}", n));
+        let bot_id = UserId::from(Bytes::from(format!("bot-{}", n)));
+
+        let bot_user = User::new_robot(bot_name, bot_id.clone());
+        let program = DoudizhuBotProgram {
+            player_id: bot_id,
+        };
+        let agent = ProgrammedUserAgent::new(bot_user.clone(), program);
+        let dyn_agent = new_dyn_user_agent(agent);
+
+        (bot_user, dyn_agent)
+    }
+}
+
+// --- Main ---
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -154,9 +229,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Configuration loaded: {:?}", config);
     info!("Starting OpenPlay Host ({}) on {}:{}", config.app, config.host, config.port);
 
-    // Initialize Owner
+    // Initialize Owner (real user, not a bot — TUI user connects with the same owner_id)
     let owner_id = UserId::from(Bytes::from(config.owner_id.clone()));
-    let owner = User::new_robot(config.owner_name, owner_id.clone());
+    let owner = User {
+        nickname: config.owner_name,
+        id: owner_id.clone(),
+        avatar_url: None,
+        is_bot: false,
+    };
 
     // Initialize Game (Only Doudizhu supported for now)
     if config.app != "doudizhu" {
@@ -185,8 +265,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let room = Room::new(room_info, owner);
 
-    // Create Room Service
-    let service = RoomService::new(game, room);
+    // Create Room Service with bot factory
+    let bot_factory = Arc::new(DoudizhuBotFactory::new());
+    let service = RoomService::new(game, room).with_bot_factory(bot_factory);
     let service_handle = service.run();
 
     // Create Server

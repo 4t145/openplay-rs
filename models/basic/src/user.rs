@@ -87,7 +87,16 @@ impl Serialize for UserId {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_bytes(&self.0)
+        // Serialize as UTF-8 string so it can be used as JSON object key (HashMap<UserId, V>).
+        // All UserIds are created from string literals via Bytes::from("..."), so this is safe.
+        match std::str::from_utf8(&self.0) {
+            Ok(s) => serializer.serialize_str(s),
+            Err(_) => {
+                // Fallback: base64 encode non-UTF8 bytes
+                use base64::prelude::*;
+                serializer.serialize_str(&BASE64_STANDARD.encode(&self.0))
+            }
+        }
     }
 }
 
@@ -96,13 +105,27 @@ impl<'de> Deserialize<'de> for UserId {
     where
         D: serde::Deserializer<'de>,
     {
-        struct PlayerIdVisitor;
+        struct UserIdVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for PlayerIdVisitor {
+        impl<'de> serde::de::Visitor<'de> for UserIdVisitor {
             type Value = UserId;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a byte array representing a UserId")
+                formatter.write_str("a string or byte array representing a UserId")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(UserId(Bytes::from(v.to_owned())))
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(UserId(Bytes::from(v)))
             }
 
             fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
@@ -124,7 +147,7 @@ impl<'de> Deserialize<'de> for UserId {
             }
         }
 
-        deserializer.deserialize_bytes(PlayerIdVisitor)
+        deserializer.deserialize_str(UserIdVisitor)
     }
 }
 
