@@ -13,17 +13,17 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-async-trait = "0.1"
 thiserror = "1.0"
 headers = "0.4"
 uuid = { version = "1.0", features = ["v4", "fast-rng"] }
-
+futures = "0.3"
 # Internal
 openplay-basic = { path = "../models/basic" }
 openplay-host = { path = "../host" }
 openplay-ua-http = { path = "../user-agents/http" }
 openplay-doudizhu = { path = "../games/doudizhu" }
 bytes = "1.11.1"
+config = "0.15.19"
 
 [dev-dependencies]
 openplay-ua-programmed = { path = "../user-agents/programmed" }
