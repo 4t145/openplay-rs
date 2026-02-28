@@ -44,13 +44,15 @@ impl UserAgent for ProgrammedUserAgent {
                 // Bots only care about game updates usually, but could be extended
                 let current_version = game_view_update.new_view.version;
                 
-                // Check for duplicate updates
+                // Check for duplicate updates (but allow version reset on new game)
                 let mut last_version_guard = last_processed_version.lock().await;
                 if let Some(last) = *last_version_guard {
-                    if current_version <= last {
-                        // Ignore outdated or duplicate update
+                    if current_version == last {
+                        // Exact duplicate — ignore
                         return Ok(());
                     }
+                    // If current_version < last, a new game started (version reset).
+                    // Accept it; don't treat it as outdated.
                 }
                 *last_version_guard = Some(current_version);
                 drop(last_version_guard); // Release lock early

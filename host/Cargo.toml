@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 openplay-basic = { workspace = true }
+chrono = "0.4"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 tracing = { version = "0.1" }

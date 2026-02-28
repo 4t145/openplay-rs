@@ -7,7 +7,7 @@ use ratatui::{
 };
 
 use fluent::fluent_args;
-use openplay_doudizhu::{DouDizhuGame, PlayerState, Role, Stage};
+use openplay_doudizhu::{DouDizhuGame, PlayerAction, PlayerState, Role, Stage};
 use openplay_poker::Card;
 
 use crate::app::GameState;
@@ -17,22 +17,39 @@ use openplay_basic;
 
 /// Main game rendering entry point (into a specific area, for log panel split).
 pub fn draw_game_in(f: &mut Frame, gs: &GameState, area: Rect) {
-    // Main layout: top opponent, middle (left opp + center + right opp), bottom hand, status bar
-    let main_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(5), // Top opponent
-            Constraint::Min(8),    // Middle area
-            Constraint::Length(5), // My hand
-            Constraint::Length(3), // Status bar
-        ])
-        .split(area);
-
     let Some(ref game) = gs.game else {
         // No game state yet, show waiting
         draw_waiting(f, gs, area);
         return;
     };
+
+    // Top-level: game area (left) + optional message panel (right)
+    if gs.show_panel {
+        let h_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(40),    // Game area (flexible)
+                Constraint::Length(28), // Message panel (fixed width)
+            ])
+            .split(area);
+        draw_game_area(f, gs, game, h_chunks[0]);
+        draw_message_panel(f, gs, h_chunks[1]);
+    } else {
+        draw_game_area(f, gs, game, area);
+    }
+}
+
+/// Draw the main game area (opponents, center, hand, status bar).
+fn draw_game_area(f: &mut Frame, gs: &GameState, game: &DouDizhuGame, area: Rect) {
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(5), // Two opponents side by side
+            Constraint::Min(6),    // Center play area
+            Constraint::Length(5), // My hand
+            Constraint::Length(2), // Status bar
+        ])
+        .split(area);
 
     let my_idx = gs.my_index.unwrap_or(0);
 
@@ -40,34 +57,53 @@ pub fn draw_game_in(f: &mut Frame, gs: &GameState, area: Rect) {
     let left_idx = (my_idx + 1) % 3;
     let right_idx = (my_idx + 2) % 3;
 
-    // Top: right opponent (across from us)
-    draw_opponent(
-        f,
-        main_chunks[0],
-        &game.players[right_idx],
-        game,
-        Alignment::Center,
-    );
-
-    // Middle: left opponent + center play area + right opponent
-    let mid_chunks = Layout::default()
+    // Top: two opponents side by side
+    let opp_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(20), // Left opponent
-            Constraint::Percentage(60), // Center
-            Constraint::Percentage(20), // Right opponent (info only, main display is top)
-        ])
-        .split(main_chunks[1]);
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(main_chunks[0]);
 
-    draw_opponent_side(f, mid_chunks[0], &game.players[left_idx], game);
-    draw_center(f, mid_chunks[1], game, gs);
-    draw_opponent_side(f, mid_chunks[2], &game.players[right_idx], game);
+    draw_opponent(f, opp_chunks[0], &game.players[left_idx], game);
+    draw_opponent(f, opp_chunks[1], &game.players[right_idx], game);
 
-    // Bottom: my hand
+    // Center play area
+    draw_center(f, main_chunks[1], game, gs);
+
+    // My hand
     draw_my_hand(f, main_chunks[2], gs);
 
     // Status bar
     draw_status_bar(f, main_chunks[3], game, gs);
+}
+
+/// Draw the right-side message panel.
+fn draw_message_panel(f: &mut Frame, gs: &GameState, area: Rect) {
+    let block = Block::default()
+        .title(i18n::t("panel-messages"))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let visible_lines = inner.height as usize;
+    if visible_lines == 0 {
+        return;
+    }
+
+    let msg_lines: Vec<Line> = gs
+        .messages
+        .iter()
+        .rev()
+        .take(visible_lines)
+        .rev()
+        .map(|m| {
+            Line::from(Span::styled(
+                m.as_str(),
+                Style::default().fg(Color::DarkGray),
+            ))
+        })
+        .collect();
+    f.render_widget(Paragraph::new(msg_lines), inner);
 }
 
 fn draw_waiting(f: &mut Frame, gs: &GameState, area: Rect) {
@@ -292,23 +328,33 @@ fn draw_waiting(f: &mut Frame, gs: &GameState, area: Rect) {
     );
 }
 
-fn draw_opponent(
-    f: &mut Frame,
-    area: Rect,
-    player: &PlayerState,
-    game: &DouDizhuGame,
-    alignment: Alignment,
-) {
+fn draw_opponent(f: &mut Frame, area: Rect, player: &PlayerState, game: &DouDizhuGame) {
     let role_str = role_string(&player.role);
-    let hand_count = player.hand.len();
+    let hand_count = player.hand_count;
     let args = fluent_args!["count" => hand_count as i64];
     let remaining = i18n::t_args("cards-remaining", &args);
 
     let name = &player.player.nickname;
-    let is_current = game.current_turn == player_index(game, player);
-    let turn_indicator = if is_current { " <<" } else { "" };
+    let p_idx = player_index(game, player);
+    let is_current = game.current_turn == p_idx;
 
-    let title = format!("{} ({}){}", name, role_str, turn_indicator);
+    // Build countdown string for current turn player
+    let countdown_str = if is_current {
+        get_countdown_string(game)
+    } else {
+        String::new()
+    };
+
+    let turn_indicator = if is_current { " <<" } else { "" };
+    let title = if countdown_str.is_empty() {
+        format!("{} ({}){}", name, role_str, turn_indicator)
+    } else {
+        format!(
+            "{} ({}) [{}]{}",
+            name, role_str, countdown_str, turn_indicator
+        )
+    };
+
     let style = if is_current {
         Style::default().fg(Color::Yellow)
     } else {
@@ -325,29 +371,13 @@ fn draw_opponent(
             Style::default().fg(Color::DarkGray)
         });
 
-    let para = Paragraph::new(remaining).alignment(alignment).block(block);
-    f.render_widget(para, area);
-}
-
-fn draw_opponent_side(f: &mut Frame, area: Rect, player: &PlayerState, _game: &DouDizhuGame) {
-    let role_str = role_string(&player.role);
-    let hand_count = player.hand.len();
-    let args = fluent_args!["count" => hand_count as i64];
-    let remaining = i18n::t_args("cards-remaining", &args);
-    let name = &player.player.nickname;
-
-    let block = Block::default()
-        .title(format!("{} ({})", name, role_str))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
-
     let para = Paragraph::new(remaining)
         .alignment(Alignment::Center)
         .block(block);
     f.render_widget(para, area);
 }
 
-fn draw_center(f: &mut Frame, area: Rect, game: &DouDizhuGame, _gs: &GameState) {
+fn draw_center(f: &mut Frame, area: Rect, game: &DouDizhuGame, gs: &GameState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::White));
@@ -358,7 +388,7 @@ fn draw_center(f: &mut Frame, area: Rect, game: &DouDizhuGame, _gs: &GameState) 
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(2), // Stage info
-            Constraint::Min(3),    // Last play
+            Constraint::Min(3),    // Play area: 3 columns for each player's last action
             Constraint::Length(2), // Hole cards
         ])
         .split(inner);
@@ -376,29 +406,40 @@ fn draw_center(f: &mut Frame, area: Rect, game: &DouDizhuGame, _gs: &GameState) 
         chunks[0],
     );
 
-    // Last play
-    if let Some(ref last) = game.last_play {
-        let player_name = game
-            .players
-            .get(last.player_idx)
-            .map(|p| p.player.nickname.as_str())
-            .unwrap_or("?");
-        let cards_str = cards_to_string(&last.cards);
-        let lines = vec![
-            Line::from(Span::styled(player_name, Style::default().fg(Color::Green))),
-            Line::from(Span::styled(
-                cards_str,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )),
-        ];
-        let para = Paragraph::new(lines).alignment(Alignment::Center);
-        f.render_widget(para, chunks[1]);
-    } else if matches!(game.stage, Stage::Playing) {
-        let para = Paragraph::new("---")
+    // Play area: 3 columns — left opponent, me, right opponent
+    // Order: [left_opp | my_action | right_opp] to match the top layout
+    if matches!(game.stage, Stage::Playing | Stage::Finished) {
+        let my_idx = gs.my_index.unwrap_or(0);
+        let left_idx = (my_idx + 1) % 3;
+        let right_idx = (my_idx + 2) % 3;
+
+        let play_cols = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+                Constraint::Ratio(1, 3),
+            ])
+            .split(chunks[1]);
+
+        draw_player_action_cell(f, play_cols[0], game, left_idx);
+        draw_player_action_cell(f, play_cols[1], game, my_idx);
+        draw_player_action_cell(f, play_cols[2], game, right_idx);
+    } else if matches!(game.stage, Stage::Bidding) {
+        // During bidding, show the current bid info in center
+        let bid_info = if game.highest_bid > 0 {
+            let bidder_name = game
+                .landlord_idx
+                .and_then(|i| game.players.get(i))
+                .map(|p| p.player.nickname.as_str())
+                .unwrap_or("?");
+            format!("{}: {}", bidder_name, game.highest_bid)
+        } else {
+            "---".to_string()
+        };
+        let para = Paragraph::new(bid_info)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(Color::Yellow));
         f.render_widget(para, chunks[1]);
     }
 
@@ -416,11 +457,62 @@ fn draw_center(f: &mut Frame, area: Rect, game: &DouDizhuGame, _gs: &GameState) 
     }
 }
 
+/// Draw a single player's action cell in the center play area.
+fn draw_player_action_cell(f: &mut Frame, area: Rect, game: &DouDizhuGame, player_idx: usize) {
+    let player = match game.players.get(player_idx) {
+        Some(p) => p,
+        None => return,
+    };
+
+    let is_current = game.current_turn == player_idx;
+    let name = &player.player.nickname;
+
+    // Name line
+    let name_style = if is_current {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Green)
+    };
+
+    let mut lines = vec![Line::from(Span::styled(name.clone(), name_style))];
+
+    // Action line(s)
+    match &player.last_action {
+        Some(PlayerAction::PlayCards(cards)) => {
+            let cards_str = cards_to_string(cards);
+            lines.push(Line::from(Span::styled(
+                cards_str,
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            )));
+        }
+        Some(PlayerAction::Pass) => {
+            lines.push(Line::from(Span::styled(
+                i18n::t("action-pass"),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+        None => {
+            if is_current && !matches!(game.stage, Stage::Finished) {
+                lines.push(Line::from(Span::styled(
+                    "...",
+                    Style::default().fg(Color::Yellow),
+                )));
+            }
+        }
+    }
+
+    let para = Paragraph::new(lines).alignment(Alignment::Center);
+    f.render_widget(para, area);
+}
+
 fn draw_my_hand(f: &mut Frame, area: Rect, gs: &GameState) {
     let hand = gs.my_hand();
-    let my_role = gs
-        .game
-        .as_ref()
+    let game = gs.game.as_ref();
+    let my_role = game
         .and_then(|g| gs.my_index.map(|i| &g.players[i].role))
         .cloned()
         .unwrap_or(Role::Undecided);
@@ -433,8 +525,27 @@ fn draw_my_hand(f: &mut Frame, area: Rect, gs: &GameState) {
     };
 
     let role_str = role_string(&my_role);
+
+    // Build countdown for my turn
+    let countdown_str = if is_my_turn {
+        game.map(|g| get_countdown_string(g)).unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let title = if countdown_str.is_empty() {
+        format!("{} ({})", i18n::t("you-label"), role_str)
+    } else {
+        format!(
+            "{} ({}) [{}]",
+            i18n::t("you-label"),
+            role_str,
+            countdown_str
+        )
+    };
+
     let block = Block::default()
-        .title(format!("You ({})", role_str))
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
 
@@ -442,7 +553,7 @@ fn draw_my_hand(f: &mut Frame, area: Rect, gs: &GameState) {
     f.render_widget(block, area);
 
     if hand.is_empty() {
-        let para = Paragraph::new("No cards")
+        let para = Paragraph::new(i18n::t("no-cards"))
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(para, inner);
@@ -549,8 +660,25 @@ fn draw_status_bar(f: &mut Frame, area: Rect, game: &DouDizhuGame, gs: &GameStat
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ));
+        // Game over action hints
+        parts.push(Span::raw(" | "));
+        parts.push(Span::styled(
+            i18n::t("gameover-hint"),
+            Style::default().fg(Color::Green),
+        ));
     }
 
+    // Shortcut hints
+    parts.push(Span::raw(" | "));
+    let panel_hint = if gs.show_panel {
+        i18n::t("panel-hide-hint")
+    } else {
+        i18n::t("panel-show-hint")
+    };
+    parts.push(Span::styled(
+        panel_hint,
+        Style::default().fg(Color::DarkGray),
+    ));
     parts.push(Span::raw(" | "));
     parts.push(Span::styled(
         i18n::t("game-disconnect-hint"),
@@ -567,6 +695,38 @@ fn draw_status_bar(f: &mut Frame, area: Rect, game: &DouDizhuGame, gs: &GameStat
 }
 
 // ---- Helpers ----
+
+/// Compute the countdown string from the game's turn_deadline.
+/// Returns something like "15s", or empty string if no deadline.
+fn get_countdown_string(game: &DouDizhuGame) -> String {
+    if let Some(deadline_ms) = game.turn_deadline {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let remaining_ms = deadline_ms - now_ms;
+        if remaining_ms <= 0 {
+            return "0s".to_string();
+        }
+        let remaining_secs = (remaining_ms + 999) / 1000; // Round up
+        if remaining_secs <= 5 {
+            // Will be rendered with red color by callers checking this
+            format!("{}s!", remaining_secs)
+        } else {
+            format!("{}s", remaining_secs)
+        }
+    } else {
+        String::new()
+    }
+}
+
+/// Check if countdown is in urgent state (<=5 seconds).
+fn is_countdown_urgent(game: &DouDizhuGame) -> bool {
+    if let Some(deadline_ms) = game.turn_deadline {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let remaining_ms = deadline_ms - now_ms;
+        remaining_ms <= 5000 && remaining_ms > 0
+    } else {
+        false
+    }
+}
 
 fn stage_string(stage: &Stage) -> String {
     match stage {

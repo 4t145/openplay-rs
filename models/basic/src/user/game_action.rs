@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{message::TypedData, user::UserId};
-
+use crate::message::TypedData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameActionData {

@@ -2,13 +2,18 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crate::{
     message::{App, TypedData},
-    room::{RoomContext, RoomPlayerPosition, RoomView},
+    room::{RoomContext, RoomView},
     user::Action,
 };
 
 pub trait Game: Send + Sync + 'static {
     fn meta(&self) -> GameMeta;
     fn handle_action(&mut self, ctx: &RoomContext, event: SequencedGameUpdate) -> GameUpdate;
+
+    /// Generate the current game view for all positions without mutating state.
+    /// Used for pushing game state to reconnecting/joining users during an active game.
+    /// Returns None if no game is in progress.
+    fn current_view(&self, ctx: &RoomContext) -> Option<GameUpdate>;
 
     /// Get the default action for a player in the current state.
     /// This is used for timeouts, auto-play, or hints.
@@ -42,6 +47,10 @@ where
 
     fn handle_action(&mut self, ctx: &RoomContext, event: SequencedGameUpdate) -> GameUpdate {
         self.inner.handle_action(ctx, event)
+    }
+
+    fn current_view(&self, ctx: &RoomContext) -> Option<GameUpdate> {
+        self.inner.current_view(ctx)
     }
 
     fn default_action(&self, player_id: &crate::user::UserId) -> Option<Action> {
@@ -139,8 +148,20 @@ pub struct Interval {
 
 #[derive(Debug, Clone)]
 pub enum GameCommand {
-    CreateTimer { id: Id, duration: Duration },
-    CancelTimer { id: Id, duration: Duration },
-    CreateInterval { id: Id },
-    CancelInterval { id: Id },
+    CreateTimer {
+        id: Id,
+        duration: Duration,
+    },
+    CancelTimer {
+        id: Id,
+        duration: Duration,
+    },
+    CreateInterval {
+        id: Id,
+    },
+    CancelInterval {
+        id: Id,
+    },
+    /// Signal that the game has ended. The room should transition back to waiting state.
+    GameOver,
 }

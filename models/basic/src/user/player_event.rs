@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ban::Ban, room::RoomPlayerPosition, user::UserId};
+use crate::{ban::Ban, user::UserId};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KickOut {

@@ -2,6 +2,9 @@
 app-title = OpenPlay TUI
 connecting = Connecting to server...
 connecting-hint = Esc: cancel
+reconnecting = Reconnecting... attempt { $attempt }/{ $max }
+reconnecting-error = Last error: { $error }
+reconnecting-hint = Esc/Q: give up and return to lobby
 disconnected = Disconnected from server
 connection-error = Connection error: { $error }
 quit-hint = Ctrl+C: quit

@@ -2,6 +2,9 @@
 app-title = OpenPlay 棋牌
 connecting = 正在连接服务器...
 connecting-hint = Esc: 取消
+reconnecting = 正在重连... 第 { $attempt }/{ $max } 次
+reconnecting-error = 上次错误: { $error }
+reconnecting-hint = Esc/Q: 放弃并返回大厅
 disconnected = 已断开连接
 connection-error = 连接错误: { $error }
 quit-hint = Ctrl+C: 退出

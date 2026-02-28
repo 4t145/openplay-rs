@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use openplay_basic::{
-    game::{DynGame, GameViewUpdate},
-    room::{Room, RoomEvent, RoomUpdate, Update},
+    game::GameViewUpdate,
+    room::{RoomUpdate, Update},
     user::{Action, DynUserAgent, UserId},
 };
 use tokio_util::sync::CancellationToken;
@@ -129,7 +129,7 @@ impl ConnectionHandle {
         self.ct.cancel();
         let _ = self.task_handle.await;
     }
-    
+
     pub fn run(
         user_agents: impl IntoIterator<Item = (UserId, DynUserAgent)> + Send + 'static,
         user_event_tx: tokio::sync::mpsc::Sender<Action>,
@@ -168,7 +168,7 @@ impl ConnectionHandle {
                 };
                 match evt {
                     Event::ReceiveCmd(ConnectionCommand::Connect {
-                        user_id: user_id,
+                        user_id,
                         agent,
                         responder,
                     }) => {
@@ -182,10 +182,7 @@ impl ConnectionHandle {
                         agents.insert(user_id, handle);
                         let _ = responder.send(());
                     }
-                    Event::ReceiveCmd(ConnectionCommand::Disconnect {
-                        user_id: user_id,
-                        responder,
-                    }) => {
+                    Event::ReceiveCmd(ConnectionCommand::Disconnect { user_id, responder }) => {
                         tracing::info!("ConnectionHandle: User {} disconnecting", user_id);
                         // Handle disconnection, e.g., by removing the PlayerProxyHandle from the agents map and quitting it.
                         let reason = if let Some(handle) = agents.remove(&user_id) {
@@ -249,9 +246,7 @@ impl ConnectionHandle {
             ct: handle_ct,
             task_handle: tokio::spawn(task),
         };
-        let controller = ConnectionController {
-            command_tx: cmd_tx,
-        };
+        let controller = ConnectionController { command_tx: cmd_tx };
         (handle, controller)
     }
 }
@@ -260,7 +255,7 @@ pub struct UaProxyContext {
     user_id: UserId,
     agent: DynUserAgent,
     user_event_tx: tokio::sync::mpsc::Sender<Action>,
-}   
+}
 
 #[derive(Debug, thiserror::Error)]
 #[error("UaProxy internal error for user {user_id}: {internal_error:?}")]
@@ -377,12 +372,11 @@ impl UaProxyHandle {
                     Event::SendUpdate(update, responder) => {
                         // Forward the room event to the agent.
                         let forward_result = agent.send_update(update).await;
-                        let _ = responder.send(forward_result.map_err(|internal_error| {
-                            UaProxyError {
+                        let _ =
+                            responder.send(forward_result.map_err(|internal_error| UaProxyError {
                                 user_id: user_id.clone(),
                                 internal_error: Some(internal_error),
-                            }
-                        }));
+                            }));
                     }
                 }
             };

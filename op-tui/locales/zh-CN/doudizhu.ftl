@@ -29,6 +29,7 @@ multiplier = { $mult } 倍
 ## Result
 winner-landlord = 地主赢了！
 winner-peasant = 农民赢了！
+gameover-hint = R: 准备 | S: 开始 | Enter: 返回房间
 
 ## Cards remaining
 cards-remaining = 剩余 { $count } 张
@@ -39,3 +40,15 @@ hole-cards = 底牌
 ## Roles label
 landlord-label = 地主
 peasant-label = 农民
+
+## Panel
+panel-messages = 消息
+panel-hide-hint = Tab: 隐藏面板
+panel-show-hint = Tab: 显示面板
+
+## Actions (center area)
+action-pass = 不出
+
+## Hand
+you-label = 你
+no-cards = 没有牌

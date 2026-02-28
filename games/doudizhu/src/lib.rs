@@ -33,9 +33,25 @@ pub enum Stage {
 pub struct PlayerState {
     pub player: User,
     pub hand: Vec<Card>,
+    #[serde(default)]
+    pub hand_count: usize,
     pub role: Role,
     pub has_passed: bool, // In bidding or playing
     pub bid_score: u8,    // 0 for pass
+    /// What this player did in the current trick (Play/Pass).
+    /// Cleared when a new trick starts (2 consecutive passes or new stage).
+    #[serde(default)]
+    pub last_action: Option<PlayerAction>,
+}
+
+/// Records what a player did in the current trick.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+pub enum PlayerAction {
+    /// Player played these cards.
+    PlayCards(Vec<Card>),
+    /// Player passed.
+    Pass,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +97,10 @@ pub struct DouDizhuGame {
     pub multiplier: u32,
     pub highest_bid: u8,
     pub winner: Option<usize>, // Player index
+    /// Unix timestamp in milliseconds for when the current turn expires.
+    /// None means no active timer (e.g., game not started or finished).
+    #[serde(default)]
+    pub turn_deadline: Option<i64>,
     #[serde(skip)]
     pub timer_id: Option<Id>,
 }
@@ -117,9 +137,11 @@ impl DouDizhuGame {
             .map(|p| PlayerState {
                 player: p,
                 hand: Vec::new(),
+                hand_count: 0,
                 role: Role::Undecided,
                 has_passed: false,
                 bid_score: 0,
+                last_action: None,
             })
             .collect();
 
@@ -138,6 +160,7 @@ impl DouDizhuGame {
             multiplier: 1,
             highest_bid: 0,
             winner: None,
+            turn_deadline: None,
             timer_id: None,
         }
     }
@@ -173,6 +196,7 @@ impl DouDizhuGame {
                 }
             }
             self.sort_hand(i);
+            self.players[i].hand_count = self.players[i].hand.len();
         }
     }
 
@@ -189,10 +213,15 @@ impl DouDizhuGame {
         // Create new timer
         let new_timer_id = Id::from(uuid::Uuid::new_v4().to_string());
         self.timer_id = Some(new_timer_id.clone());
+        let timeout = Duration::from_secs(self.config.turn_timeout_seconds);
         commands.push(GameCommand::CreateTimer {
             id: new_timer_id,
-            duration: Duration::from_secs(self.config.turn_timeout_seconds),
+            duration: timeout,
         });
+
+        // Set deadline for client-side countdown display
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        self.turn_deadline = Some(now_ms + (self.config.turn_timeout_seconds as i64 * 1000));
 
         commands
     }
@@ -310,6 +339,8 @@ impl DouDizhuGame {
                                 // Give hole cards
                                 self.players[landlord].hand.extend(self.hole_cards.clone());
                                 self.sort_hand(landlord);
+                                self.players[landlord].hand_count =
+                                    self.players[landlord].hand.len();
                                 self.players[landlord].role = Role::Landlord;
                                 for i in 0..3 {
                                     if i != landlord {
@@ -321,6 +352,9 @@ impl DouDizhuGame {
                                 self.current_turn = landlord;
                                 self.consecutive_passes = 0;
                                 self.last_play = None;
+                                for p in &mut self.players {
+                                    p.last_action = None;
+                                }
                                 commands.extend(self.start_turn_timer());
                             }
                         } else {
@@ -364,6 +398,26 @@ impl DouDizhuGame {
                                 state_changed = true;
                                 // Apply update
                                 self.players[player_idx].hand = temp_hand;
+                                self.players[player_idx].hand_count =
+                                    self.players[player_idx].hand.len();
+
+                                // Record per-player action for UI display
+                                // New trick: clear all players' last_action when the trick winner plays again
+                                if let Some(ref last) = self.last_play {
+                                    if last.player_idx == player_idx {
+                                        // This player won the last trick, starting a new trick
+                                        for p in &mut self.players {
+                                            p.last_action = None;
+                                        }
+                                    }
+                                } else {
+                                    // No last_play means free turn (new trick), clear all
+                                    for p in &mut self.players {
+                                        p.last_action = None;
+                                    }
+                                }
+                                self.players[player_idx].last_action =
+                                    Some(PlayerAction::PlayCards(cards.clone()));
 
                                 // Update Last Play
                                 self.last_play = Some(LastPlay {
@@ -384,6 +438,7 @@ impl DouDizhuGame {
                                 if self.players[player_idx].hand.is_empty() {
                                     self.stage = Stage::Finished;
                                     self.winner = Some(player_idx);
+                                    self.turn_deadline = None;
                                     // Cancel timer if game finished
                                     if let Some(timer_id) = self.timer_id.take() {
                                         commands.push(GameCommand::CancelTimer {
@@ -391,6 +446,8 @@ impl DouDizhuGame {
                                             duration: Duration::ZERO,
                                         });
                                     }
+                                    // Signal game over to room service
+                                    commands.push(GameCommand::GameOver);
                                 } else {
                                     commands.extend(self.next_turn());
                                 }
@@ -407,10 +464,15 @@ impl DouDizhuGame {
 
                         if can_pass {
                             state_changed = true;
+                            // Record per-player pass action
+                            self.players[player_idx].last_action = Some(PlayerAction::Pass);
                             self.consecutive_passes += 1;
                             commands.extend(self.next_turn());
 
                             // If 2 people passed, next player starts new round
+                            // Note: we do NOT clear last_action here — the UI needs to show
+                            // that both opponents passed. last_action will be cleared when
+                            // the trick winner plays their next card (see Play handler above).
                             if self.consecutive_passes >= 2 {
                                 self.last_play = None;
                                 self.consecutive_passes = 0;
@@ -468,9 +530,11 @@ impl DouDizhuGame {
             .map(|p| PlayerState {
                 player: p,
                 hand: Vec::new(),
+                hand_count: 0,
                 role: Role::Undecided,
                 has_passed: false,
                 bid_score: 0,
+                last_action: None,
             })
             .collect();
 
@@ -485,12 +549,14 @@ impl DouDizhuGame {
         self.landlord_idx = None;
         self.last_play = None;
         self.winner = None;
+        self.turn_deadline = None;
         self.version = 1;
 
         for p in &mut self.players {
             p.role = Role::Undecided;
             p.bid_score = 0;
             p.has_passed = false;
+            p.last_action = None;
         }
     }
 
@@ -511,12 +577,14 @@ impl DouDizhuGame {
         self.landlord_idx = None;
         self.last_play = None;
         self.winner = None;
+        self.turn_deadline = None;
         self.version += 1;
 
         for p in &mut self.players {
             p.role = Role::Undecided;
             p.bid_score = 0;
             p.has_passed = false;
+            p.last_action = None;
         }
     }
 
@@ -541,6 +609,13 @@ impl DouDizhuGame {
                 for (i, p_val) in players.iter_mut().enumerate() {
                     if Some(i) != for_player_idx {
                         if let Some(obj) = p_val.as_object_mut() {
+                            // Preserve hand_count before clearing hand
+                            let count = obj
+                                .get("hand")
+                                .and_then(|h| h.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+                            obj.insert("hand_count".to_string(), serde_json::json!(count));
                             obj.insert("hand".to_string(), serde_json::json!([]));
                         }
                     }
@@ -630,6 +705,17 @@ impl Game for DouDizhuGame {
 
         self.make_update(ctx, events, commands)
     }
+
+    fn current_view(&self, ctx: &RoomContext) -> Option<GameUpdate> {
+        // Only produce a view if the game is actually in progress
+        match self.stage {
+            Stage::Bidding | Stage::Playing | Stage::Finished => {}
+            Stage::Setup => return None,
+        }
+        // Reuse make_update with empty events and no commands
+        Some(self.make_update(ctx, vec![], vec![]))
+    }
+
     fn default_action(&self, player_id: &openplay_basic::user::UserId) -> Option<UserAction> {
         let player_idx = self
             .players

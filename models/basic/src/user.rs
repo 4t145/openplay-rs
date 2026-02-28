@@ -7,8 +7,7 @@ pub mod game_action;
 pub mod player_event;
 pub mod room_action;
 use crate::{
-    message::{self, TypedData},
-    room::{RoomEvent, Update},
+    room::Update,
     user::{game_action::GameActionData, room_action::RoomActionData},
 };
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,7 +54,10 @@ pub enum ActionData {
 
 impl ActionData {
     pub fn with_source(self, source: impl Into<ActionSource>) -> Action {
-        Action { source: source.into(), data: self }   
+        Action {
+            source: source.into(),
+            data: self,
+        }
     }
 }
 

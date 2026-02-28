@@ -126,11 +126,12 @@ async fn run_app(
                         }
                     }
                     KeyAction::Disconnect => {
-                        // Disconnect from server and return to lobby
                         events.detach_sse();
                         if let Some(ref client) = app.client {
                             let _ = client.disconnect().await;
                         }
+                        // From Reconnecting, always go to lobby
+                        // From Game, also go to lobby (user explicitly chose to disconnect)
                         app.go_to_lobby(None);
                     }
                     KeyAction::SendAction(action) => {
@@ -144,17 +145,41 @@ async fn run_app(
             }
             event::AppEvent::ServerConnected => {
                 tracing::info!("SSE connection confirmed");
-                // Grab user_id before connected() consumes pending_user_id
-                let user_id = app.pending_user_id.clone();
-                app.connected();
-                // Auto-send Join action so the server adds us to room.state
-                if let (Some(ref client), Some(uid)) = (&app.client, user_id) {
-                    let join_action = ActionData::RoomAction(RoomActionData::Join(JoinRoom {
-                        nickname: uid,
-                    }));
-                    if let Err(e) = client.send_action(join_action).await {
-                        tracing::warn!("Failed to send Join action: {:#}", e);
+                match &app.screen {
+                    app::Screen::Connecting => {
+                        // Normal first connection
+                        let user_id = app.pending_user_id.clone();
+                        app.connected();
+                        // Auto-send Join action so the server adds us to room.state
+                        if let (Some(ref client), Some(uid)) = (&app.client, user_id) {
+                            let join_action = ActionData::RoomAction(RoomActionData::Join(JoinRoom {
+                                nickname: uid,
+                            }));
+                            if let Err(e) = client.send_action(join_action).await {
+                                tracing::warn!("Failed to send Join action: {:#}", e);
+                            }
+                        }
                     }
+                    app::Screen::Reconnecting(_) => {
+                        // Reconnection succeeded — get user_id from the preserved GameState
+                        // before transitioning back to Game screen
+                        let user_id = if let app::Screen::Reconnecting(ref rs) = app.screen {
+                            Some(rs.game_state.my_user_id.clone())
+                        } else {
+                            None
+                        };
+                        app.reconnected();
+                        // Re-send Join to tell server we're back
+                        if let (Some(ref client), Some(uid)) = (&app.client, user_id) {
+                            let join_action = ActionData::RoomAction(RoomActionData::Join(JoinRoom {
+                                nickname: uid,
+                            }));
+                            if let Err(e) = client.send_action(join_action).await {
+                                tracing::warn!("Failed to send Join action on reconnect: {:#}", e);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             event::AppEvent::ServerUpdate(update) => {
@@ -172,23 +197,87 @@ async fn run_app(
                     app::Screen::Game(ref mut gs) => {
                         gs.push_message(format!("Error: {}", err));
                     }
+                    // If reconnecting, the SSE task will end and ServerDisconnected
+                    // will follow, which triggers the next retry via Tick.
+                    // Just record the error for display.
+                    app::Screen::Reconnecting(ref mut rs) => {
+                        rs.last_error = Some(err);
+                    }
                     _ => {}
                 }
             }
             event::AppEvent::ServerDisconnected => {
                 events.detach_sse();
-                match app.screen {
-                    app::Screen::Connecting => {
+                // Check if we're in Reconnecting first (needs mutable borrow)
+                let action = match &app.screen {
+                    app::Screen::Connecting => Some("connection_failed"),
+                    app::Screen::Game(gs) if gs.game.is_some() => Some("reconnect"),
+                    app::Screen::Game(_) => Some("lobby"),
+                    app::Screen::Reconnecting(_) => Some("retry"),
+                    _ => None,
+                };
+                match action {
+                    Some("connection_failed") => {
                         app.connection_failed("Connection closed before completing".to_string());
                     }
-                    app::Screen::Game(_) => {
+                    Some("reconnect") => {
+                        let server_url = cfg.server_url.clone();
+                        let room_path = cfg.room_path.clone();
+                        app.go_to_reconnecting(server_url, room_path);
+                        tracing::info!("Entering reconnection mode");
+                    }
+                    Some("lobby") => {
                         app.go_to_lobby(Some("Server disconnected".to_string()));
+                    }
+                    Some("retry") => {
+                        // A reconnection attempt's SSE stream ended.
+                        // Increment attempts; the Tick handler will retry.
+                        if let app::Screen::Reconnecting(ref mut rs) = app.screen {
+                            rs.attempts += 1;
+                            if rs.last_error.is_none() {
+                                rs.last_error = Some("Connection closed".to_string());
+                            }
+                            tracing::warn!(
+                                "Reconnect attempt {} failed",
+                                rs.attempts
+                            );
+                        }
                     }
                     _ => {}
                 }
             }
             event::AppEvent::Tick => {
-                // Just triggers a redraw via the loop
+                // Drive reconnection attempts
+                if let app::Screen::Reconnecting(ref rs) = app.screen {
+                    // Check if we've exhausted all attempts
+                    if rs.attempts >= rs.max_attempts {
+                        tracing::error!("Max reconnection attempts reached, returning to lobby");
+                        app.go_to_lobby(Some("Reconnection failed after max attempts".to_string()));
+                    } else if app.client.is_none() {
+                        // No active connection attempt — start one
+                        let server_url = rs.server_url.clone();
+                        let room_path = rs.room_path.clone();
+                        let user_id = rs.game_state.my_user_id.clone();
+                        tracing::info!(
+                            "Reconnection attempt {}/{}",
+                            rs.attempts + 1,
+                            rs.max_attempts,
+                        );
+                        match try_connect(&mut app, &server_url, &user_id, &room_path) {
+                            Ok(sse_stream) => {
+                                events.attach_sse(sse_stream);
+                            }
+                            Err(e) => {
+                                tracing::warn!("Reconnect try_connect failed: {:#}", e);
+                                if let app::Screen::Reconnecting(ref mut rs) = app.screen {
+                                    rs.last_error = Some(format!("{:#}", e));
+                                    rs.attempts += 1;
+                                }
+                            }
+                        }
+                    }
+                    // else: client exists, SSE is in-flight — wait for ServerConnected or ServerDisconnected
+                }
             }
             event::AppEvent::Resize(_, _) => {
                 // Terminal resize, just redraw

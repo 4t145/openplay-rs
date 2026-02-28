@@ -29,6 +29,7 @@ multiplier = x{ $mult }
 ## Result
 winner-landlord = Landlord wins!
 winner-peasant = Peasants win!
+gameover-hint = R: ready | S: start | Enter: back to room
 
 ## Cards remaining
 cards-remaining = { $count } cards left
@@ -39,3 +40,15 @@ hole-cards = Hole cards
 ## Roles label
 landlord-label = Landlord
 peasant-label = Peasant
+
+## Panel
+panel-messages = Messages
+panel-hide-hint = Tab: hide panel
+panel-show-hint = Tab: show panel
+
+## Actions (center area)
+action-pass = Pass
+
+## Hand
+you-label = You
+no-cards = No cards

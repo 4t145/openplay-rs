@@ -3,7 +3,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     message::TypedData,
     room::{Chat, RoomPlayerPosition, RoomUserPosition},
-    user::UserId,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

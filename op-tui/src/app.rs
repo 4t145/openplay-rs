@@ -36,6 +36,25 @@ pub enum Screen {
     Lobby(LobbyState),
     Connecting,
     Game(GameState),
+    /// Reconnecting after a disconnect during an active game.
+    /// Preserves the GameState so the user can see the last known state.
+    Reconnecting(ReconnectingState),
+}
+
+/// State for the reconnecting screen.
+pub struct ReconnectingState {
+    /// Preserved game state from before disconnect.
+    pub game_state: GameState,
+    /// Server URL to reconnect to.
+    pub server_url: String,
+    /// Room path for reconnection.
+    pub room_path: String,
+    /// Number of reconnection attempts so far.
+    pub attempts: u32,
+    /// Maximum number of reconnection attempts before giving up.
+    pub max_attempts: u32,
+    /// Error message from the last failed attempt, if any.
+    pub last_error: Option<String>,
 }
 
 /// Log panel display mode.
@@ -82,6 +101,8 @@ pub struct GameState {
     pub messages: Vec<String>,
     /// Our user_id string for matching.
     pub my_user_id: String,
+    /// Whether to show the right-side message panel during game.
+    pub show_panel: bool,
 }
 
 impl GameState {
@@ -98,6 +119,7 @@ impl GameState {
             kick_mode: false,
             messages: Vec::new(),
             my_user_id: user_id.to_string(),
+            show_panel: true,
         }
     }
 
@@ -197,12 +219,37 @@ impl App {
 
     /// Process a server update.
     pub fn handle_server_update(&mut self, update: Update) {
-        let Screen::Game(ref mut gs) = self.screen else {
-            return;
+        // Handle updates in both Game and Reconnecting screens
+        let gs = match &mut self.screen {
+            Screen::Game(ref mut gs) => gs,
+            Screen::Reconnecting(ref mut rs) => &mut rs.game_state,
+            _ => return,
         };
 
         match update {
             Update::Room(room_update) => {
+                // Check if room transitioned back to Waiting while we were in a game
+                if gs.game.is_some() {
+                    if matches!(
+                        room_update.room.state.phase.kind,
+                        openplay_basic::room::RoomPhaseKind::Waiting
+                    ) {
+                        // If the game is finished, keep displaying it so the user can see results.
+                        // The game state will be cleared when:
+                        // - A new GameView arrives (next game starts), or
+                        // - The user presses Enter to dismiss the game-over screen.
+                        let is_finished = gs
+                            .game
+                            .as_ref()
+                            .map_or(false, |g| matches!(g.stage, ddz::Stage::Finished));
+                        if !is_finished {
+                            gs.game = None;
+                            gs.selected.clear();
+                            gs.cursor = 0;
+                            gs.bid_mode = false;
+                        }
+                    }
+                }
                 gs.room = Some(room_update.room);
                 for event in &room_update.events {
                     gs.push_message(format!("{:?}", event));
@@ -300,6 +347,13 @@ impl App {
                     _ => KeyAction::None,
                 }
             }
+            Screen::Reconnecting(_) => {
+                // Esc or Q gives up reconnecting and returns to lobby
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => KeyAction::Disconnect,
+                    _ => KeyAction::None,
+                }
+            }
             Screen::Game(gs) => handle_game_key(gs, key),
         }
     }
@@ -347,6 +401,49 @@ impl App {
             focus: 0,
             error_message: error,
         });
+    }
+
+    /// Enter reconnecting state, preserving game state for display.
+    /// Returns (server_url, user_id, room_path) for the caller to initiate reconnection.
+    pub fn go_to_reconnecting(&mut self, server_url: String, room_path: String) {
+        self.client = None;
+        // Take the GameState out of Screen::Game
+        let old_screen = std::mem::replace(
+            &mut self.screen,
+            Screen::Lobby(LobbyState {
+                server_url: String::new(),
+                user_id: String::new(),
+                focus: 0,
+                error_message: None,
+            }),
+        );
+        if let Screen::Game(gs) = old_screen {
+            self.screen = Screen::Reconnecting(ReconnectingState {
+                game_state: gs,
+                server_url,
+                room_path,
+                attempts: 0,
+                max_attempts: 10,
+                last_error: None,
+            });
+        }
+        // If not in Game screen, fall through to lobby (shouldn't happen)
+    }
+
+    /// Reconnection succeeded. Transition from Reconnecting -> Game.
+    pub fn reconnected(&mut self) {
+        let old_screen = std::mem::replace(
+            &mut self.screen,
+            Screen::Lobby(LobbyState {
+                server_url: String::new(),
+                user_id: String::new(),
+                focus: 0,
+                error_message: None,
+            }),
+        );
+        if let Screen::Reconnecting(rs) = old_screen {
+            self.screen = Screen::Game(rs.game_state);
+        }
     }
 }
 
@@ -457,6 +554,44 @@ fn handle_game_key(gs: &mut GameState, key: KeyEvent) -> KeyAction {
         }
     }
 
+    // --- Game over screen: stage is Finished, room is back to Waiting ---
+    // Allow R (ready), S (start), Enter (dismiss to waiting room), Q (disconnect).
+    if let Some(ref game) = gs.game {
+        if matches!(game.stage, ddz::Stage::Finished) {
+            match key.code {
+                // R: toggle ready for next game
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    let new_ready = !gs.my_ready_state().unwrap_or(false);
+                    return KeyAction::SendAction(ActionData::RoomAction(
+                        RoomActionData::ChangeReadyState(ReadyStateChange {
+                            is_ready: new_ready,
+                        }),
+                    ));
+                }
+                // S: start next game (owner only)
+                KeyCode::Char('s') | KeyCode::Char('S') => {
+                    return KeyAction::SendAction(ActionData::RoomAction(
+                        RoomActionData::RoomManage(RoomManage::StartGame),
+                    ));
+                }
+                // Enter: dismiss game-over screen, go back to waiting room view
+                KeyCode::Enter => {
+                    gs.game = None;
+                    gs.selected.clear();
+                    gs.cursor = 0;
+                    gs.bid_mode = false;
+                    return KeyAction::None;
+                }
+                // Tab: toggle panel
+                KeyCode::Tab => {
+                    gs.show_panel = !gs.show_panel;
+                }
+                _ => {}
+            }
+            return KeyAction::None;
+        }
+    }
+
     // --- Waiting phase (no game yet): room management keys ---
     if gs.game.is_none() {
         match key.code {
@@ -505,6 +640,11 @@ fn handle_game_key(gs: &mut GameState, key: KeyEvent) -> KeyAction {
 
     // --- Active game phase ---
     match key.code {
+        // Tab: toggle message panel
+        KeyCode::Tab => {
+            gs.show_panel = !gs.show_panel;
+        }
+
         // Ready toggle (also available during game for re-match scenarios)
         KeyCode::Char('r') | KeyCode::Char('R') => {
             let new_ready = !gs.my_ready_state().unwrap_or(false);
