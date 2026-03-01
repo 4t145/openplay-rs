@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["games/*", "models/*", "host", "user-agents/*", "op-host", "op-tui"]
+members = ["games/*", "models/*", "host", "user-agents/*", "client", "op-host", "op-tui"]
 
 [workspace.metadata]
 
 
 [workspace.dependencies]
-rand = { version = "0.9.2" }
+rand = { version = "0.10" }
 serde = { version = "1", features = ["derive"] }
 openplay-basic = { path = "models/basic" }

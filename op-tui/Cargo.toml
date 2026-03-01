@@ -12,10 +12,6 @@ path = "src/main.rs"
 ratatui = "0.29"
 crossterm = "0.28"
 
-# Networking
-reqwest = { version = "0.12", features = ["json", "stream"] }
-reqwest-eventsource = "0.6"
-
 # Async
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
@@ -38,11 +34,11 @@ sys-locale = "0.3"
 openplay-basic = { path = "../models/basic" }
 openplay-doudizhu = { path = "../games/doudizhu" }
 openplay-poker = { path = "../models/poker" }
+openplay-client = { path = "../client" }
 
 # Utilities
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 chrono = "0.4"
 anyhow = "1"
-async-stream = "0.3"
 bytes = "1"

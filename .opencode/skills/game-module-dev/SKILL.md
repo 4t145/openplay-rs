@@ -314,7 +314,7 @@ openplay-basic = { path = "../../models/basic" }
 # openplay-poker = { path = "../../models/poker" }  # 如果是扑克类游戏
 bytes = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-rand = "0.9"
+rand = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1.21.0", features = ["v4", "fast-rng"] }

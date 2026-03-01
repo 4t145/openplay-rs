@@ -15,7 +15,7 @@ use openplay_basic::user::{
     User,
 };
 use openplay_poker::{Card, Deck};
-use rand::Rng;
+use rand::{Rng, RngExt};
 use serde::{Deserialize, Serialize};
 
 pub mod bot;
@@ -328,10 +328,8 @@ impl DouDizhuGame {
                             // Redeal
                             self.redeal(); // This resets state
                             return (vec![], self.start_turn_timer());
-                        } else if self.highest_bid > 0 && self.consecutive_passes >= 2 {
-                            true
                         } else {
-                            false
+                            self.highest_bid > 0 && self.consecutive_passes >= 2
                         };
 
                         if bidding_ended {

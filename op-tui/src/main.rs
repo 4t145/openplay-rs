@@ -1,5 +1,4 @@
 mod app;
-mod client;
 mod config;
 mod event;
 mod i18n;
@@ -28,6 +27,7 @@ use openplay_basic::user::{
     room_action::{JoinRoom, RoomActionData},
     ActionData,
 };
+use openplay_client::{authenticate, load_or_create, RoomClient, SseEvent};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -78,10 +78,11 @@ async fn run_app(
     let mut app = App::new(cfg.server_url.clone(), cfg.user_id.clone(), log_buffer);
     let mut events = EventManager::new(Duration::from_millis(250));
 
-    // If we have both server_url and user_id from config, auto-connect
-    if cfg.user_id.is_some() {
+    // Auto-connect if we have enough info from config
+    let should_auto_connect = cfg.key_file.is_some() || cfg.user_id.is_some();
+    if should_auto_connect {
         if let Some((server_url, user_id)) = app.start_connect() {
-            match try_connect(&mut app, &server_url, &user_id, &cfg.room_path) {
+            match try_connect(&mut app, &server_url, &user_id, &cfg.room_path, &cfg).await {
                 Ok(sse_stream) => {
                     events.attach_sse(sse_stream);
                 }
@@ -115,7 +116,7 @@ async fn run_app(
                     }
                     KeyAction::Connect => {
                         if let Some((server_url, user_id)) = app.start_connect() {
-                            match try_connect(&mut app, &server_url, &user_id, &cfg.room_path) {
+                            match try_connect(&mut app, &server_url, &user_id, &cfg.room_path, &cfg).await {
                                 Ok(sse_stream) => {
                                     events.attach_sse(sse_stream);
                                 }
@@ -263,7 +264,7 @@ async fn run_app(
                             rs.attempts + 1,
                             rs.max_attempts,
                         );
-                        match try_connect(&mut app, &server_url, &user_id, &room_path) {
+                        match try_connect(&mut app, &server_url, &user_id, &room_path, &cfg).await {
                             Ok(sse_stream) => {
                                 events.attach_sse(sse_stream);
                             }
@@ -288,19 +289,89 @@ async fn run_app(
     Ok(())
 }
 
-/// Create a GameClient and start its SSE stream (lazy — no actual HTTP yet).
-/// Sets `app.client` but does NOT change screen state (that happens on ServerConnected).
-fn try_connect(
+/// Authenticate and create a [`RoomClient`], then start its SSE stream.
+///
+/// Auth mode is determined by config priority:
+/// 1. `key_file` set in config → load (or create) the key file, run challenge-response auth
+/// 2. `user_id` set → legacy mode: use user_id as the Bearer token directly (no challenge)
+/// 3. Lobby-entered `user_id` → same as (2)
+///
+/// Sets `app.client` but does NOT change screen state (that happens on `ServerConnected`).
+async fn try_connect(
     app: &mut App,
     server_url: &str,
     user_id: &str,
     room_path: &str,
-) -> Result<impl futures::Stream<Item = Result<client::SseEvent>> + Send + 'static> {
-    let client = client::GameClient::new(
-        server_url.to_string(),
-        room_path.to_string(),
-        user_id.to_string(),
-    )?;
+    cfg: &TuiConfig,
+) -> Result<impl futures::Stream<Item = Result<SseEvent>> + Send + 'static> {
+    let client = if let Some(ref key_file_path) = cfg.key_file {
+        // Key-file mode: load/create identity, run challenge-response auth
+        let nickname = cfg
+            .nickname
+            .clone()
+            .unwrap_or_else(|| "player".to_string());
+        let key_pair = if std::path::Path::new(key_file_path).exists() {
+            openplay_client::KeyPair::load(std::path::Path::new(key_file_path))?
+        } else {
+            let kp = openplay_client::KeyPair::generate(&nickname);
+            kp.save(std::path::Path::new(key_file_path))?;
+            kp
+        };
+        let actual_user_id = key_pair.user_id().to_string();
+        tracing::info!("Authenticating as user_id={}", actual_user_id);
+        let token = authenticate(server_url, &key_pair).await?;
+        RoomClient::new(
+            server_url.to_string(),
+            room_path.to_string(),
+            token,
+            actual_user_id,
+        )?
+    } else if cfg.key_file.is_none() && cfg.user_id.is_none() && !user_id.is_empty() {
+        // Lobby-entered user_id with no key_file configured:
+        // Try to auto-load from the default identity directory, or use user_id as-is (legacy).
+        let default_dir = openplay_client::default_user_dir()?;
+        let nickname = cfg
+            .nickname
+            .clone()
+            .unwrap_or_else(|| user_id.to_string());
+        match load_or_create(&default_dir, &nickname) {
+            Ok(key_pair) => {
+                let actual_user_id = key_pair.user_id().to_string();
+                tracing::info!(
+                    "Auto-loaded identity from default dir, user_id={}",
+                    actual_user_id
+                );
+                let token = authenticate(server_url, &key_pair).await?;
+                RoomClient::new(
+                    server_url.to_string(),
+                    room_path.to_string(),
+                    token,
+                    actual_user_id,
+                )?
+            }
+            Err(e) => {
+                // Fall back to legacy bearer-token mode using the typed user_id
+                tracing::warn!(
+                    "Could not load/create identity ({}), falling back to legacy auth",
+                    e
+                );
+                RoomClient::new(
+                    server_url.to_string(),
+                    room_path.to_string(),
+                    user_id.to_string(),
+                    user_id.to_string(),
+                )?
+            }
+        }
+    } else {
+        // Legacy mode: user_id is used directly as the Bearer token
+        RoomClient::new(
+            server_url.to_string(),
+            room_path.to_string(),
+            user_id.to_string(),
+            user_id.to_string(),
+        )?
+    };
 
     let sse_stream = client.connect_sse();
     app.client = Some(client);

@@ -71,20 +71,27 @@ struct ServerConfig {
     owner_id: String,
     owner_name: String,
     endpoint: Option<String>,
+    /// JWT HMAC-SHA256 签名密钥（明文字符串，生产环境应从环境变量注入）
+    jwt_secret: String,
+    /// JWT 有效期（秒），默认 86400（24小时）
+    jwt_ttl_secs: Option<u64>,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             port: 3000,
-            host: "0.0.0.0".to_string(), // Listen on all interfaces by default
+            host: "0.0.0.0".to_string(),
             app: "doudizhu".to_string(),
             room_id: "room-1".to_string(),
             title: "OpenPlay Room".to_string(),
             description: Some("A default OpenPlay room".to_string()),
-            owner_id: "alice".to_string(),
+            owner_id: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
             owner_name: "Alice".to_string(),
             endpoint: None,
+            // 默认密钥仅供开发调试，生产请通过 OP_HOST_JWT_SECRET 环境变量覆盖
+            jwt_secret: "change-me-in-production".to_string(),
+            jwt_ttl_secs: None,
         }
     }
 }
@@ -143,7 +150,7 @@ impl BotFactory for DoudizhuBotFactory {
     fn create_bot(&self, name: Option<String>) -> (User, DynUserAgent) {
         let n = self.bot_counter.fetch_add(1, Ordering::Relaxed);
         let bot_name = name.unwrap_or_else(|| format!("Bot-{}", n));
-        let bot_id = UserId::from(Bytes::from(format!("bot-{}", n)));
+        let bot_id = UserId::random();
 
         let bot_user = User::new_robot(bot_name, bot_id.clone());
         let program = DoudizhuBotProgram {
@@ -178,7 +185,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .set_default("room_id", defaults.room_id)?
         .set_default("title", defaults.title)?
         .set_default("owner_id", defaults.owner_id)?
-        .set_default("owner_name", defaults.owner_name)?;
+        .set_default("owner_name", defaults.owner_name)?
+        .set_default("jwt_secret", defaults.jwt_secret)?;
 
     if let Some(desc) = defaults.description {
         builder = builder.set_default("description", desc)?;
@@ -230,7 +238,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting OpenPlay Host ({}) on {}:{}", config.app, config.host, config.port);
 
     // Initialize Owner (real user, not a bot — TUI user connects with the same owner_id)
-    let owner_id = UserId::from(Bytes::from(config.owner_id.clone()));
+    let owner_id = UserId::try_from(config.owner_id.as_str())
+        .unwrap_or_else(|e| {
+            tracing::warn!(
+                "配置中的 owner_id 不是合法的 base64-32字节 UserId（{}），已生成随机 ID",
+                e
+            );
+            UserId::random()
+        });
     let owner = User {
         nickname: config.owner_name,
         id: owner_id.clone(),
@@ -280,7 +295,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .next()
         .ok_or_else(|| format!("Failed to resolve address: {}", addr_str))?;
 
-    run_server(addr, server.registry, server.handle.connection_controller).await?;
+    run_server(
+        addr,
+        server.registry,
+        server.handle.connection_controller,
+        config.jwt_secret.into_bytes(),
+        config.jwt_ttl_secs,
+    )
+    .await?;
 
     Ok(())
 }

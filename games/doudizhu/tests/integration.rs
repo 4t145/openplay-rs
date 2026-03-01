@@ -9,16 +9,23 @@ use openplay_basic::user::{
 };
 use openplay_doudizhu::{get_app, Action, DouDizhuGame, Role, Stage};
 
+/// 用单字节值构造确定性 UserId（字节填充到32位，首字节为 id）
+fn user_id_from_byte(id: u8) -> UserId {
+    let mut bytes = [0u8; 32];
+    bytes[0] = id;
+    UserId::from_bytes(bytes)
+}
+
 fn create_player(id: u8, name: &str) -> User {
     User {
-        id: UserId::from(Bytes::from(vec![id])),
+        id: user_id_from_byte(id),
         nickname: name.to_string(),
         avatar_url: None,
         is_bot: false,
     }
 }
 
-fn create_update(player_id: u8, action: Action, ref_version: u32) -> SequencedGameUpdate {
+fn create_update(player_id: &UserId, action: Action, ref_version: u32) -> SequencedGameUpdate {
     let json = serde_json::to_vec(&action).unwrap();
     let typed_data = TypedData {
         r#type: DataType {
@@ -37,7 +44,7 @@ fn create_update(player_id: u8, action: Action, ref_version: u32) -> SequencedGa
     SequencedGameUpdate {
         seq: 1,
         event: GameEvent::Action(UserAction {
-            source: ActionSource::User(UserId::from(Bytes::from(vec![player_id]))),
+            source: ActionSource::User(player_id.clone()),
             data: UserActionData::GameAction(game_action_data),
         }),
     }
@@ -98,25 +105,8 @@ fn test_game_flow() {
     let first_player_idx = game.current_turn;
     let first_player_id = game.players[first_player_idx].player.id.clone();
 
-    // Need to extract the byte from UserId.
-    // UserId wraps Bytes.
-    // We created it with vec![id].
-    // But UserId doesn't expose inner Bytes publicly easily?
-    // It has Display impl which encodes base64.
-    // It implements Serialize.
-    // We can just rely on the fact we created it.
-    // Let's iterate our players to find matching ID.
-
-    let first_id_u8 = if first_player_id == p1.id {
-        1
-    } else if first_player_id == p2.id {
-        2
-    } else {
-        3
-    };
-
     // First player bids 1
-    let msg = create_update(first_id_u8, Action::Bid { score: 1 }, game.version);
+    let msg = create_update(&first_player_id, Action::Bid { score: 1 }, game.version);
     let update = game.handle_action(&ctx, msg);
     let state = get_state(&update);
 
@@ -130,15 +120,8 @@ fn test_game_flow() {
     // Next player bids 2
     let next_idx = (first_player_idx + 1) % 3;
     let next_player_id = game.players[next_idx].player.id.clone();
-    let next_id_u8 = if next_player_id == p1.id {
-        1
-    } else if next_player_id == p2.id {
-        2
-    } else {
-        3
-    };
 
-    let msg = create_update(next_id_u8, Action::Bid { score: 2 }, game.version);
+    let msg = create_update(&next_player_id, Action::Bid { score: 2 }, game.version);
     let update = game.handle_action(&ctx, msg);
     let state = get_state(&update);
 
@@ -151,15 +134,8 @@ fn test_game_flow() {
     // Third player passes (score 0)
     let third_idx = (next_idx + 1) % 3;
     let third_player_id = game.players[third_idx].player.id.clone();
-    let third_id_u8 = if third_player_id == p1.id {
-        1
-    } else if third_player_id == p2.id {
-        2
-    } else {
-        3
-    };
 
-    let msg = create_update(third_id_u8, Action::Bid { score: 0 }, game.version);
+    let msg = create_update(&third_player_id, Action::Bid { score: 0 }, game.version);
     let update = game.handle_action(&ctx, msg);
     let state = get_state(&update);
 
@@ -167,7 +143,7 @@ fn test_game_flow() {
 
     // Player 1 passes (cannot raise to 3? or decides to pass).
     // Note: Player 1 was the first bidder. It is now their turn again.
-    let msg = create_update(first_id_u8, Action::Bid { score: 0 }, game.version);
+    let msg = create_update(&first_player_id, Action::Bid { score: 0 }, game.version);
     let update = game.handle_action(&ctx, msg);
     let state = get_state(&update);
 

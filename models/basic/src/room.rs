@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    Dtu,
     game::GameViewUpdate,
     user::{User, UserId},
-    Dtu,
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
@@ -16,7 +16,7 @@ pub struct Room {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Update {
-    Room(RoomUpdate),
+    Room(Box<RoomUpdate>),
     GameView(GameViewUpdate),
 }
 

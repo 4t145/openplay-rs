@@ -14,7 +14,6 @@ use openplay_basic::{
 use openplay_doudizhu::{self as ddz, DouDizhuGame};
 use openplay_poker::Card;
 
-use crate::client::GameClient;
 use crate::log_buffer::LogBuffer;
 
 /// What the main loop should do after handling a key event.
@@ -188,7 +187,7 @@ impl GameState {
 /// The main application state.
 pub struct App {
     pub screen: Screen,
-    pub client: Option<GameClient>,
+    pub client: Option<openplay_client::RoomClient>,
     /// User ID for the pending/active connection, stored so we can transition
     /// from Connecting -> Game when ServerConnected arrives.
     pub pending_user_id: Option<String>,
@@ -229,25 +228,25 @@ impl App {
         match update {
             Update::Room(room_update) => {
                 // Check if room transitioned back to Waiting while we were in a game
-                if gs.game.is_some() {
-                    if matches!(
+                if gs.game.is_some()
+                    && matches!(
                         room_update.room.state.phase.kind,
                         openplay_basic::room::RoomPhaseKind::Waiting
-                    ) {
-                        // If the game is finished, keep displaying it so the user can see results.
-                        // The game state will be cleared when:
-                        // - A new GameView arrives (next game starts), or
-                        // - The user presses Enter to dismiss the game-over screen.
-                        let is_finished = gs
-                            .game
-                            .as_ref()
-                            .map_or(false, |g| matches!(g.stage, ddz::Stage::Finished));
-                        if !is_finished {
-                            gs.game = None;
-                            gs.selected.clear();
-                            gs.cursor = 0;
-                            gs.bid_mode = false;
-                        }
+                    )
+                {
+                    // If the game is finished, keep displaying it so the user can see results.
+                    // The game state will be cleared when:
+                    // - A new GameView arrives (next game starts), or
+                    // - The user presses Enter to dismiss the game-over screen.
+                    let is_finished = gs
+                        .game
+                        .as_ref()
+                        .is_some_and(|g| matches!(g.stage, ddz::Stage::Finished));
+                    if !is_finished {
+                        gs.game = None;
+                        gs.selected.clear();
+                        gs.cursor = 0;
+                        gs.bid_mode = false;
                     }
                 }
                 gs.room = Some(room_update.room);

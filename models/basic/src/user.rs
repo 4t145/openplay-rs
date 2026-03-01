@@ -1,7 +1,6 @@
-use std::pin::Pin;
-
-use bytes::Bytes;
+use base64::prelude::*;
 use futures_util::future::BoxFuture;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 pub mod game_action;
 pub mod player_event;
@@ -10,14 +9,67 @@ use crate::{
     room::Update,
     user::{game_action::GameActionData, room_action::RoomActionData},
 };
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UserId(Bytes);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum ActionSource {
     User(UserId),
     System,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UserId([u8; ed25519_dalek::PUBLIC_KEY_LENGTH]);
+
+/// UserId 解析错误
+#[derive(Debug, thiserror::Error)]
+pub enum UserIdParseError {
+    #[error("base64 解码失败: {0}")]
+    Base64Error(#[from] base64::DecodeError),
+    #[error("长度不正确：期望 {expected} 字节，实际 {got} 字节")]
+    InvalidLength { expected: usize, got: usize },
+}
+
+impl UserId {
+    pub fn random() -> Self {
+        let mut rng = rand::rng();
+        let mut bytes = [0u8; ed25519_dalek::PUBLIC_KEY_LENGTH];
+        rng.fill_bytes(&mut bytes);
+        UserId(bytes)
+    }
+
+    /// 直接从固定长度字节数组构造，供测试或内部使用
+    pub fn from_bytes(bytes: [u8; ed25519_dalek::PUBLIC_KEY_LENGTH]) -> Self {
+        UserId(bytes)
+    }
+
+    /// 返回内部字节的引用
+    pub fn as_bytes(&self) -> &[u8; ed25519_dalek::PUBLIC_KEY_LENGTH] {
+        &self.0
+    }
+}
+
+impl TryFrom<&str> for UserId {
+    type Error = UserIdParseError;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let decoded = BASE64_STANDARD.decode(s)?;
+        if decoded.len() != ed25519_dalek::PUBLIC_KEY_LENGTH {
+            return Err(UserIdParseError::InvalidLength {
+                expected: ed25519_dalek::PUBLIC_KEY_LENGTH,
+                got: decoded.len(),
+            });
+        }
+        let mut bytes = [0u8; ed25519_dalek::PUBLIC_KEY_LENGTH];
+        bytes.copy_from_slice(&decoded);
+        Ok(UserId(bytes))
+    }
+}
+
+impl TryFrom<String> for UserId {
+    type Error = UserIdParseError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        UserId::try_from(s.as_str())
+    }
 }
 
 impl From<UserId> for ActionSource {
@@ -73,14 +125,8 @@ impl Action {
 impl std::fmt::Display for UserId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use base64::prelude::*;
-        let encoded = BASE64_STANDARD.encode(&self.0);
+        let encoded = BASE64_STANDARD.encode(self.0);
         write!(f, "{}", encoded)
-    }
-}
-
-impl From<Bytes> for UserId {
-    fn from(bytes: Bytes) -> Self {
-        UserId(bytes)
     }
 }
 
@@ -89,15 +135,13 @@ impl Serialize for UserId {
     where
         S: serde::Serializer,
     {
-        // Serialize as UTF-8 string so it can be used as JSON object key (HashMap<UserId, V>).
-        // All UserIds are created from string literals via Bytes::from("..."), so this is safe.
-        match std::str::from_utf8(&self.0) {
-            Ok(s) => serializer.serialize_str(s),
-            Err(_) => {
-                // Fallback: base64 encode non-UTF8 bytes
-                use base64::prelude::*;
-                serializer.serialize_str(&BASE64_STANDARD.encode(&self.0))
-            }
+        if serializer.is_human_readable() {
+            // For human-readable formats, encode as base64 string
+            let encoded = BASE64_STANDARD.encode(self.0);
+            serializer.serialize_str(&encoded)
+        } else {
+            // For binary formats, serialize as bytes
+            serializer.serialize_bytes(&self.0)
         }
     }
 }
@@ -107,49 +151,36 @@ impl<'de> Deserialize<'de> for UserId {
     where
         D: serde::Deserializer<'de>,
     {
-        struct UserIdVisitor;
-
-        impl<'de> serde::de::Visitor<'de> for UserIdVisitor {
-            type Value = UserId;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a string or byte array representing a UserId")
+        if deserializer.is_human_readable() {
+            // For human-readable formats, expect a base64 string
+            let s = String::deserialize(deserializer)?;
+            let decoded = BASE64_STANDARD
+                .decode(s.as_bytes())
+                .map_err(serde::de::Error::custom)?;
+            if decoded.len() != ed25519_dalek::PUBLIC_KEY_LENGTH {
+                return Err(serde::de::Error::custom(format!(
+                    "Invalid length for UserId: expected {}, got {}",
+                    ed25519_dalek::PUBLIC_KEY_LENGTH,
+                    decoded.len()
+                )));
             }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(UserId(Bytes::from(v.to_owned())))
+            let mut bytes = [0u8; ed25519_dalek::PUBLIC_KEY_LENGTH];
+            bytes.copy_from_slice(&decoded);
+            Ok(UserId(bytes))
+        } else {
+            // For binary formats, deserialize as bytes
+            let bytes = Vec::<u8>::deserialize(deserializer)?;
+            if bytes.len() != ed25519_dalek::PUBLIC_KEY_LENGTH {
+                return Err(serde::de::Error::custom(format!(
+                    "Invalid length for UserId: expected {}, got {}",
+                    ed25519_dalek::PUBLIC_KEY_LENGTH,
+                    bytes.len()
+                )));
             }
-
-            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(UserId(Bytes::from(v)))
-            }
-
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(UserId(Bytes::copy_from_slice(v)))
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let mut bytes = Vec::new();
-                while let Some(byte) = seq.next_element()? {
-                    bytes.push(byte);
-                }
-                Ok(UserId(Bytes::from(bytes)))
-            }
+            let mut array = [0u8; ed25519_dalek::PUBLIC_KEY_LENGTH];
+            array.copy_from_slice(&bytes);
+            Ok(UserId(array))
         }
-
-        deserializer.deserialize_str(UserIdVisitor)
     }
 }
 

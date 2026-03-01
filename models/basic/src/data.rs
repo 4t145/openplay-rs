@@ -5,6 +5,15 @@ use std::ops::{Deref, DerefMut};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Data(pub Bytes);
 
+impl<T> From<T> for Data
+where
+    T: Into<Bytes>,
+{
+    fn from(value: T) -> Self {
+        Data(value.into())
+    }
+}
+
 impl serde::Serialize for Data {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -19,7 +28,7 @@ impl serde::Serialize for Data {
             serializer.serialize_bytes(&self.0)
         }
     }
-}
+}   
 
 impl<'de> serde::Deserialize<'de> for Data {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -55,8 +64,3 @@ impl DerefMut for Data {
     }
 }
 
-impl From<Bytes> for Data {
-    fn from(bytes: Bytes) -> Self {
-        Data(bytes)
-    }
-}

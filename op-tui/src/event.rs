@@ -6,7 +6,7 @@ use futures::stream::{Stream, StreamExt};
 use openplay_basic::room::Update;
 use tokio::sync::mpsc;
 
-use crate::client::SseEvent;
+use openplay_client::SseEvent;
 
 /// Unified application event, merging terminal input, server updates, and ticks.
 #[derive(Debug)]

@@ -1,0 +1,38 @@
+[package]
+name = "openplay-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# 内部
+openplay-basic = { path = "../models/basic" }
+
+# HTTP / SSE
+reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest-eventsource = "0.6"
+
+# 加密
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+base64 = "0.22"
+
+# 异步
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-stream = "0.3"
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# 跨平台路径
+dirs = "5"
+
+# 错误处理
+anyhow = "1"
+thiserror = "2"
+
+# 随机数
+rand = { workspace = true }
+
+# 日志
+tracing = "0.1"

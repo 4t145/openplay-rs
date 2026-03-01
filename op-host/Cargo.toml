@@ -13,7 +13,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-thiserror = "1.0"
+thiserror = "2"
 headers = "0.4"
 uuid = { version = "1.0", features = ["v4", "fast-rng"] }
 futures = "0.3"
@@ -25,5 +25,11 @@ openplay-ua-programmed = { path = "../user-agents/programmed" }
 openplay-doudizhu = { path = "../games/doudizhu" }
 bytes = "1.11.1"
 config = "0.15.19"
+# Auth
+jsonwebtoken = "9"
+dashmap = "6"
+base64 = "0.22"
+ed25519-dalek = "2"
+rand = { workspace = true }
 
 [dev-dependencies]

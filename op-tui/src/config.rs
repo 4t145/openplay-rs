@@ -12,9 +12,17 @@ pub struct CliArgs {
     #[arg(long)]
     pub server_url: Option<String>,
 
-    /// User ID for authentication
+    /// User ID for authentication (manual override; skips key-file auth)
     #[arg(long)]
     pub user_id: Option<String>,
+
+    /// Path to identity key file (JSON); if omitted, uses default identity dir
+    #[arg(long)]
+    pub key_file: Option<String>,
+
+    /// Nickname to use when generating a new identity
+    #[arg(long)]
+    pub nickname: Option<String>,
 
     /// Locale (e.g. "en", "zh-CN")
     #[arg(long)]
@@ -31,9 +39,19 @@ pub struct TuiConfig {
     #[serde(default = "default_server_url")]
     pub server_url: String,
 
-    /// User ID (if not set, will prompt in lobby)
+    /// Manual user ID override (bypasses key-file auth when set)
     #[serde(default)]
     pub user_id: Option<String>,
+
+    /// Path to the identity key file (JSON).
+    /// When set, the TUI loads (or creates) this key file and authenticates via
+    /// the challenge-response flow instead of sending user_id as the Bearer token.
+    #[serde(default)]
+    pub key_file: Option<String>,
+
+    /// Nickname for auto-generating a new identity when no key file exists yet.
+    #[serde(default)]
+    pub nickname: Option<String>,
 
     /// Locale preference
     #[serde(default)]
@@ -57,6 +75,8 @@ impl Default for TuiConfig {
         Self {
             server_url: default_server_url(),
             user_id: None,
+            key_file: None,
+            nickname: None,
             locale: None,
             room_path: default_room_path(),
         }
@@ -91,6 +111,12 @@ impl TuiConfig {
         }
         if let Some(ref uid) = args.user_id {
             builder = builder.set_override("user_id", uid.clone())?;
+        }
+        if let Some(ref path) = args.key_file {
+            builder = builder.set_override("key_file", path.clone())?;
+        }
+        if let Some(ref nick) = args.nickname {
+            builder = builder.set_override("nickname", nick.clone())?;
         }
         if let Some(ref locale) = args.locale {
             builder = builder.set_override("locale", locale.clone())?;

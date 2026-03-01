@@ -10,16 +10,16 @@ use openplay_basic::user::{
 use openplay_doudizhu::{get_app, Action, DouDizhuGame, Role, Stage};
 use openplay_poker::{Card, Rank, Suit};
 
-fn make_player(id: &str) -> User {
+fn make_player(id: UserId, nickname: &str) -> User {
     User {
-        id: UserId::from(Bytes::from(id.to_string())),
-        nickname: id.to_string(),
+        id,
+        nickname: nickname.to_string(),
         avatar_url: None,
         is_bot: false,
     }
 }
 
-fn make_action_update(player_id: &str, action: Action, ref_version: u32) -> SequencedGameUpdate {
+fn make_action_update(player_id: &UserId, action: Action, ref_version: u32) -> SequencedGameUpdate {
     let json = serde_json::to_vec(&action).unwrap();
     let typed_data = TypedData {
         r#type: DataType {
@@ -38,7 +38,7 @@ fn make_action_update(player_id: &str, action: Action, ref_version: u32) -> Sequ
     SequencedGameUpdate {
         seq: 1,
         event: GameEvent::Action(UserAction {
-            source: ActionSource::User(UserId::from(Bytes::from(player_id.to_string()))),
+            source: ActionSource::User(player_id.clone()),
             data: UserActionData::GameAction(game_action_data),
         }),
     }
@@ -83,9 +83,9 @@ fn get_state(update: &openplay_basic::game::GameUpdate) -> DouDizhuGame {
 
 #[test]
 fn test_invalid_move_rejected() {
-    let p1 = make_player("p1");
-    let p2 = make_player("p2");
-    let p3 = make_player("p3");
+    let p1 = make_player(UserId::random(), "p1");
+    let p2 = make_player(UserId::random(), "p2");
+    let p3 = make_player(UserId::random(), "p3");
 
     let mut game = DouDizhuGame::new(vec![p1.clone(), p2.clone(), p3.clone()]);
     // Manually init minimal state for testing logic
@@ -99,13 +99,13 @@ fn test_invalid_move_rejected() {
     // Give specific cards to p1
     game.players[0].hand = vec![card(Rank::Three), card(Rank::Four), card(Rank::Five)];
 
-    let ctx = make_room_context(&[p1, p2, p3]);
+    let ctx = make_room_context(&[p1.clone(), p2.clone(), p3.clone()]);
 
     // 2. Attempt to play cards not in hand
     let action = Action::Play {
         cards: vec![card(Rank::Ace)], // p1 doesn't have Ace
     };
-    let update = game.handle_action(&ctx, make_action_update("p1", action, 1));
+    let update = game.handle_action(&ctx, make_action_update(&p1.id, action, 1));
 
     // State should NOT change (turn should still be 0)
     let state = get_state(&update);
@@ -117,7 +117,7 @@ fn test_invalid_move_rejected() {
     let action = Action::Play {
         cards: vec![card(Rank::Three)],
     };
-    let update = game.handle_action(&ctx, make_action_update("p1", action, 1));
+    let update = game.handle_action(&ctx, make_action_update(&p1.id, action, 1));
     let state = get_state(&update);
     assert_eq!(state.current_turn, 1); // Turn advanced
     assert_eq!(state.players[0].hand.len(), 2);
@@ -133,7 +133,7 @@ fn test_invalid_move_rejected() {
         cards: vec![card(Rank::Three)],
     };
     // Correct version is 2 now
-    let update = game.handle_action(&ctx, make_action_update("p2", action, 2));
+    let update = game.handle_action(&ctx, make_action_update(&p2.id, action, 2));
     let state = get_state(&update);
     assert_eq!(state.current_turn, 1); // Still p2's turn, move rejected
     assert_eq!(state.version, 2);
@@ -142,7 +142,7 @@ fn test_invalid_move_rejected() {
     let action = Action::Play {
         cards: vec![card(Rank::Five)],
     };
-    let update = game.handle_action(&ctx, make_action_update("p2", action, 2));
+    let update = game.handle_action(&ctx, make_action_update(&p2.id, action, 2));
     let state = get_state(&update);
     assert_eq!(state.current_turn, 2); // Turn advanced
     assert_eq!(state.version, 3);
@@ -150,12 +150,12 @@ fn test_invalid_move_rejected() {
 
 #[test]
 fn test_pass_logic() {
-    let p1 = make_player("p1");
-    let p2 = make_player("p2");
-    let p3 = make_player("p3");
+    let p1 = make_player(UserId::random(), "p1");
+    let p2 = make_player(UserId::random(), "p2");
+    let p3 = make_player(UserId::random(), "p3");
 
     let mut game = DouDizhuGame::new(vec![p1.clone(), p2.clone(), p3.clone()]);
-    let ctx = make_room_context(&[p1, p2, p3]);
+    let ctx = make_room_context(&[p1.clone(), p2.clone(), p3.clone()]);
     game.start(&ctx); // Helper to init deck etc
 
     // Override for specific test scenario
@@ -170,7 +170,7 @@ fn test_pass_logic() {
     let update = game.handle_action(
         &ctx,
         make_action_update(
-            "p1",
+            &p1.id,
             Action::Play {
                 cards: vec![card(Rank::Three)],
             },
@@ -183,7 +183,7 @@ fn test_pass_logic() {
     game = state;
 
     // p2 Passes
-    let update = game.handle_action(&ctx, make_action_update("p2", Action::Pass, 11));
+    let update = game.handle_action(&ctx, make_action_update(&p2.id, Action::Pass, 11));
     let state = get_state(&update);
     assert_eq!(state.current_turn, 2);
     assert_eq!(state.consecutive_passes, 1);
@@ -191,7 +191,7 @@ fn test_pass_logic() {
     game = state;
 
     // p3 Passes
-    let update = game.handle_action(&ctx, make_action_update("p3", Action::Pass, 12));
+    let update = game.handle_action(&ctx, make_action_update(&p3.id, Action::Pass, 12));
     let state = get_state(&update);
     // After 2 passes (p2, p3), it should be p1's turn again (the original player)
     assert_eq!(state.current_turn, 0);
@@ -201,27 +201,27 @@ fn test_pass_logic() {
 
 #[test]
 fn test_optimistic_locking() {
-    let p1 = make_player("p1");
-    let p2 = make_player("p2");
-    let p3 = make_player("p3");
+    let p1 = make_player(UserId::random(), "p1");
+    let p2 = make_player(UserId::random(), "p2");
+    let p3 = make_player(UserId::random(), "p3");
     let mut game = DouDizhuGame::new(vec![p1.clone(), p2.clone(), p3.clone()]);
     game.stage = Stage::Playing;
     game.players[0].hand = vec![card(Rank::Three)];
     game.version = 5;
 
-    let ctx = make_room_context(&[p1, p2, p3]);
+    let ctx = make_room_context(&[p1.clone(), p2.clone(), p3]);
 
     // Attempt action with stale version (4)
     let action = Action::Play {
         cards: vec![card(Rank::Three)],
     };
-    let update = game.handle_action(&ctx, make_action_update("p1", action.clone(), 4));
+    let update = game.handle_action(&ctx, make_action_update(&p1.id, action.clone(), 4));
 
     let state = get_state(&update);
     assert_eq!(state.version, 5); // Unchanged
 
     // Attempt action with correct version (5)
-    let update = game.handle_action(&ctx, make_action_update("p1", action, 5));
+    let update = game.handle_action(&ctx, make_action_update(&p1.id, action, 5));
     let state = get_state(&update);
     assert_eq!(state.version, 6); // Changed
 }

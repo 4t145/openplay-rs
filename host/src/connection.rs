@@ -198,7 +198,7 @@ impl ConnectionHandle {
                         let mut batch_send_join_set = tokio::task::JoinSet::new();
                         for (_pid, handle) in &agents {
                             let update = update.clone();
-                            let send_task = handle.send_update(Update::Room(update));
+                            let send_task = handle.send_update(Update::Room(Box::new(update)));
                             let user_id = handle.user_id.clone();
                             batch_send_join_set.spawn(async move {
                                 if let Err(e) = send_task.await {

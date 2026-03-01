@@ -111,3 +111,11 @@ Answer user's question in what language they ask with.
 - **解耦**: 组件不关心 `AppState` 中还有什么（数据库、缓存等）。
 - **可测试性**: 单元测试时可以轻松 mock 一个实现了 Trait 的简单状态，无需构建复杂的应用上下文。
 - **灵活性**: 配置可以在运行时加载（例如从环境变量或配置中心），而不是硬编码在组件内部。
+
+## 文档索引
+
+| 文件 | 说明 |
+|---|---|
+| `design.md` | 整体架构设计：用户身份模型、Room 机制、Action/Update 流程 |
+| `client/USER_IDENTITY.md` | 用户身份存储格式、默认路径、API 用法、认证流程及 op-tui 集成说明 |
+| `games/doudizhu/INSTRUCTION.md` | 斗地主游戏规格：状态机、出牌规则、计时器、视图掩码、客户端快捷键 |

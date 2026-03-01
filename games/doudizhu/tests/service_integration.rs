@@ -138,9 +138,9 @@ async fn test_service_integration() {
 
     let finished_notify = Arc::new(Notify::new());
 
-    let p1_id = UserId::from(Bytes::from("p1"));
-    let p2_id = UserId::from(Bytes::from("p2"));
-    let p3_id = UserId::from(Bytes::from("p3"));
+    let p1_id = UserId::random();
+    let p2_id = UserId::random();
+    let p3_id = UserId::random();
 
     let p1 = User::new_robot("Player 1".to_string(), p1_id.clone());
     let p2 = User::new_robot("Player 2".to_string(), p2_id.clone());
