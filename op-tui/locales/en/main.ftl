@@ -13,9 +13,22 @@ quit-hint = Ctrl+C: quit
 lobby-title = Lobby
 lobby-server-label = Server:
 lobby-user-label = User ID:
+lobby-user-selected-label = User:
 lobby-connect = Press Enter to connect
 lobby-connecting = Connecting...
-lobby-hint = Tab: switch field | Enter: connect | F12: logs | Ctrl+C: quit
+lobby-hint = Tab: switch field | Enter: connect | Ctrl+U: user | F12: logs | Ctrl+C: quit
+
+## User Manager
+user-manager-title = User Manager
+user-manager-mode-browse = Browse identities
+user-manager-mode-create = Create identity
+user-manager-mode-delete = Confirm delete
+user-manager-empty = No local identities
+user-manager-select-hint = Enter: select | N: new | D: delete | R: refresh | Esc: back
+user-manager-hint = Up/Down: navigate | Enter: select | N: new | D: delete | R: refresh | Esc: back
+user-manager-nickname = Nickname:
+user-manager-nickname-required = Nickname is required
+user-manager-delete-confirm = Delete selected identity? Enter/Y: confirm, Esc/N: cancel
 
 ## Room
 room-waiting = Waiting for players...

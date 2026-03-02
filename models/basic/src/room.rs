@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Dtu,
     game::GameViewUpdate,
     user::{User, UserId},
+    Dtu,
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Room {
@@ -21,11 +21,10 @@ pub enum Update {
 }
 
 impl Room {
-    pub fn new(mut info: RoomInfo, owner: User) -> Self {
-        info.owner = owner.id.clone();
+    pub fn new(info: RoomInfo) -> Self {
         Room {
             info,
-            state: RoomState::from_owner(owner),
+            state: RoomState::empty(),
         }
     }
     pub fn remove_player(&mut self, player_id: &UserId) -> Option<User> {
@@ -64,20 +63,10 @@ pub struct RoomState {
 }
 
 impl RoomState {
-    pub fn from_owner(player: User) -> Self {
-        let players = HashMap::new();
-        let mut observers = HashMap::new();
-        observers.insert(
-            player.id.clone(),
-            RoomObserverState {
-                is_connected: true,
-                view: RoomObserverView::default(),
-                player: player.clone(),
-            },
-        );
+    pub fn empty() -> Self {
         RoomState {
-            players,
-            observers,
+            players: HashMap::new(),
+            observers: HashMap::new(),
             phase: RoomPhase {
                 kind: RoomPhaseKind::Waiting,
                 since: chrono::Utc::now(),

@@ -38,13 +38,27 @@ pub fn draw_lobby_in(f: &mut Frame, lobby: &LobbyState, area: Rect) {
         lobby.focus == 0,
     );
 
-    // User ID field
+    // User ID / local identity field
+    let user_label = if lobby.selected_identity.is_some() {
+        i18n::t("lobby-user-selected-label")
+    } else {
+        i18n::t("lobby-user-label")
+    };
+    let user_value = if let Some(ref profile) = lobby.selected_identity {
+        format!(
+            "{} ({})",
+            profile.nickname,
+            truncate_user_id(&profile.user_id)
+        )
+    } else {
+        lobby.user_id.clone()
+    };
     draw_input_field(
         f,
         chunks[1],
-        &i18n::t("lobby-user-label"),
-        &lobby.user_id,
-        lobby.focus == 1,
+        &user_label,
+        &user_value,
+        lobby.focus == 1 && lobby.selected_identity.is_none(),
     );
 
     // Connect hint
@@ -104,4 +118,14 @@ fn draw_input_field(f: &mut Frame, area: Rect, label: &str, value: &str, focused
         .border_style(border_style);
     let para = Paragraph::new(line).block(block);
     f.render_widget(para, area);
+}
+
+fn truncate_user_id(user_id: &str) -> String {
+    let max_len = 16;
+    if user_id.len() <= max_len {
+        return user_id.to_string();
+    }
+    let start = &user_id[..8.min(user_id.len())];
+    let end = &user_id[user_id.len().saturating_sub(6)..];
+    format!("{}..{}", start, end)
 }

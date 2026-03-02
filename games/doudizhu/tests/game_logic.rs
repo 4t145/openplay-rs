@@ -62,7 +62,7 @@ fn make_room_context(players: &[User]) -> RoomContext {
         endpoint: "test://".to_string(),
         game_config: None,
     };
-    let mut room = Room::new(room_info, owner);
+    let mut room = Room::new(room_info);
     for (i, p) in players.iter().enumerate() {
         room.state.players.insert(
             RoomPlayerPosition::from(i.to_string()),

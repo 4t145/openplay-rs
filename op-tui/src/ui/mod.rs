@@ -1,6 +1,7 @@
 pub mod doudizhu;
 pub mod lobby;
 pub mod log_panel;
+pub mod user_manager;
 
 use fluent::FluentArgs;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout};
@@ -40,6 +41,7 @@ pub fn draw(f: &mut Frame, app: &App) {
         Screen::Connecting => draw_connecting(f, main_area),
         Screen::Game(gs) => doudizhu::draw_game_in(f, gs, main_area),
         Screen::Reconnecting(rs) => draw_reconnecting(f, rs, main_area),
+        Screen::UserManager(um) => user_manager::draw_user_manager_in(f, um, main_area),
     }
 
     // Draw log panel if visible

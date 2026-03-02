@@ -128,7 +128,7 @@ impl RoomClient {
             while let Some(event) = es.next().await {
                 match event {
                     Ok(reqwest_eventsource::Event::Open) => {
-                        tracing::info!("SSE 连接已建立");
+                        tracing::info!("SSE Connection opened");
                         yield Ok(SseEvent::Connected);
                     }
                     Ok(reqwest_eventsource::Event::Message(msg)) => {

@@ -20,43 +20,43 @@ use tracing::info;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Configuration file path
-    #[arg(short, long)]
+    #[arg(short, long, env)]
     config: Option<String>,
 
     /// Port to listen on
-    #[arg(short, long)]
+    #[arg(short, long, env)]
     port: Option<u16>,
 
     /// Address to bind to
-    #[arg(short('H'), long)]
+    #[arg(short('H'), long, env)]
     host: Option<String>,
 
     /// Game type
-    #[arg(short, long, alias("game"))]
+    #[arg(short, long, alias("game"), env)]
     app: Option<String>,
 
     /// Room ID
-    #[arg(long)]
+    #[arg(long, env)]
     room_id: Option<String>,
 
     /// Room Title
-    #[arg(long)]
+    #[arg(long, env)]
     title: Option<String>,
 
     /// Room Description
-    #[arg(long)]
+    #[arg(long, env)]
     description: Option<String>,
 
     /// Room Owner ID
-    #[arg(long)]
+    #[arg(long, env)]
     owner_id: Option<String>,
 
     /// Room Owner Display Name
-    #[arg(long)]
+    #[arg(long, env)]
     owner_name: Option<String>,
 
     /// Public Endpoint URL (e.g. http://example.com/room)
-    #[arg(long)]
+    #[arg(long, env)]
     endpoint: Option<String>,
 }
 
@@ -237,21 +237,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Configuration loaded: {:?}", config);
     info!("Starting OpenPlay Host ({}) on {}:{}", config.app, config.host, config.port);
 
-    // Initialize Owner (real user, not a bot — TUI user connects with the same owner_id)
+    // Initialize Owner id (real user — TUI user connects with the same owner_id)
     let owner_id = UserId::try_from(config.owner_id.as_str())
         .unwrap_or_else(|e| {
             tracing::warn!(
-                "配置中的 owner_id 不是合法的 base64-32字节 UserId（{}），已生成随机 ID",
-                e
+                // "配置中的 owner_id 不是合法的 base64-32字节 UserId（{}），已生成随机 ID",
+                "Invalid owner_id in config ({}), generating random UserId instead: {}",
+                e,
+                config.owner_id
             );
             UserId::random()
         });
-    let owner = User {
-        nickname: config.owner_name,
-        id: owner_id.clone(),
-        avatar_url: None,
-        is_bot: false,
-    };
 
     // Initialize Game (Only Doudizhu supported for now)
     if config.app != "doudizhu" {
@@ -278,7 +274,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         game_config: None,
     };
 
-    let room = Room::new(room_info, owner);
+    let room = Room::new(room_info);
 
     // Create Room Service with bot factory
     let bot_factory = Arc::new(DoudizhuBotFactory::new());

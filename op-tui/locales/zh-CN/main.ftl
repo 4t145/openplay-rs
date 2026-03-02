@@ -13,9 +13,22 @@ quit-hint = Ctrl+C: 退出
 lobby-title = 大厅
 lobby-server-label = 服务器:
 lobby-user-label = 用户 ID:
+lobby-user-selected-label = 用户:
 lobby-connect = 按 Enter 连接
 lobby-connecting = 连接中...
-lobby-hint = Tab: 切换字段 | Enter: 连接 | F12: 日志 | Ctrl+C: 退出
+lobby-hint = Tab: 切换字段 | Enter: 连接 | Ctrl+U: 用户 | F12: 日志 | Ctrl+C: 退出
+
+## User Manager
+user-manager-title = 用户管理
+user-manager-mode-browse = 浏览身份
+user-manager-mode-create = 新建身份
+user-manager-mode-delete = 删除确认
+user-manager-empty = 暂无本地身份
+user-manager-select-hint = Enter: 选择 | N: 新建 | D: 删除 | R: 刷新 | Esc: 返回
+user-manager-hint = Up/Down: 选择 | Enter: 选择 | N: 新建 | D: 删除 | R: 刷新 | Esc: 返回
+user-manager-nickname = 昵称:
+user-manager-nickname-required = 请输入昵称
+user-manager-delete-confirm = 删除当前身份？Enter/Y: 确认，Esc/N: 取消
 
 ## Room
 room-waiting = 等待玩家加入...

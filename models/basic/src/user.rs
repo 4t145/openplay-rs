@@ -16,15 +16,22 @@ pub enum ActionSource {
     User(UserId),
     System,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive( Clone, PartialEq, Eq, Hash)]
 pub struct UserId([u8; ed25519_dalek::PUBLIC_KEY_LENGTH]);
+
+impl std::fmt::Debug for UserId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let encoded = BASE64_STANDARD.encode(self.0);
+        write!(f, "UserId({})", encoded)
+    }
+}
 
 /// UserId 解析错误
 #[derive(Debug, thiserror::Error)]
 pub enum UserIdParseError {
-    #[error("base64 解码失败: {0}")]
+    #[error("base64 decode failed: {0}")]
     Base64Error(#[from] base64::DecodeError),
-    #[error("长度不正确：期望 {expected} 字节，实际 {got} 字节")]
+    #[error("invalid length: expected {expected} bytes, got {got} bytes")]
     InvalidLength { expected: usize, got: usize },
 }
 

@@ -524,8 +524,10 @@ impl RoomService {
                 }
             }
             RoomActionData::RoomManage(manage) => {
-                // Check if user is owner
-                if room.info.owner == *user_id {
+                // Check if user is owner and already in room
+                let in_room = room.state.players.values().any(|p| p.player.id == *user_id)
+                    || room.state.observers.contains_key(user_id);
+                if room.info.owner == *user_id && in_room {
                     match manage {
                         RoomManage::KickOut(kick) => {
                             if let Some(_) = room.remove_player(&kick.player) {
@@ -641,7 +643,7 @@ impl RoomService {
                     }
                 } else {
                     tracing::warn!(
-                        "RoomManage: user {:?} is not room owner ({:?}), action {:?} rejected",
+                        "RoomManage: user {:?} is not room owner/in room ({:?}), action {:?} rejected",
                         user_id,
                         room.info.owner,
                         manage

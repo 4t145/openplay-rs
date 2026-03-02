@@ -160,7 +160,7 @@ async fn test_service_integration() {
         endpoint: "ws://localhost".to_string(),
         game_config: None,
     };
-    let mut room = Room::new(room_info, p1.clone());
+    let mut room = Room::new(room_info);
 
     // Add other players to the room state manually for test (usually join via connection)
     // We mock room state here
@@ -178,9 +178,7 @@ async fn test_service_integration() {
         );
     };
 
-    // p1 is already added as owner/observer? No, Room::new adds owner as observer.
-    // We need to add them as players explicitly if we want them to play.
-    // Room::new adds owner as observer only.
+    // Room::new no longer auto-adds owner. We add players explicitly for the test.
 
     // Add p1, p2, p3 as players
     add_player(p1.clone(), 0);

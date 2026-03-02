@@ -229,7 +229,7 @@ pub fn load_or_create(dir: &Path, default_nickname: &str) -> Result<KeyPair, Ide
     // 尝试加载已有身份
     let entries = list_identities(dir)?;
     if let Some((_path, kp)) = entries.into_iter().next() {
-        tracing::info!("加载已有身份: {} ({})", kp.card.nickname, kp.user_id());
+        tracing::info!("loading existing identity: {} ({})", kp.card.nickname, kp.user_id());
         return Ok(kp);
     }
 
@@ -238,6 +238,6 @@ pub fn load_or_create(dir: &Path, default_nickname: &str) -> Result<KeyPair, Ide
     let filename = identity_filename(&kp.user_id());
     let path = dir.join(&filename);
     kp.save(&path)?;
-    tracing::info!("已生成新身份: {} -> {:?}", kp.user_id(), path);
+    tracing::info!("generated new identity: {} -> {:?}", kp.user_id(), path);
     Ok(kp)
 }

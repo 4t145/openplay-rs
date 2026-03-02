@@ -4,6 +4,7 @@ mod event;
 mod i18n;
 mod log_buffer;
 mod ui;
+mod user_identity;
 
 use std::time::Duration;
 
@@ -81,8 +82,28 @@ async fn run_app(
     // Auto-connect if we have enough info from config
     let should_auto_connect = cfg.key_file.is_some() || cfg.user_id.is_some();
     if should_auto_connect {
+        if let Some(ref key_file_path) = cfg.key_file {
+            if let Ok(profile) =
+                user_identity::load_identity_from_path(std::path::Path::new(key_file_path))
+            {
+                if let app::Screen::Lobby(ref mut lobby) = app.screen {
+                    lobby.selected_identity = Some(profile.clone());
+                    lobby.user_id = profile.user_id.clone();
+                }
+            }
+        }
+        let pending_kei_file = app.pending_key_file.clone();
         if let Some((server_url, user_id)) = app.start_connect() {
-            match try_connect(&mut app, &server_url, &user_id, &cfg.room_path, &cfg).await {
+            match try_connect(
+                &mut app,
+                &server_url,
+                &user_id,
+                &cfg.room_path,
+                &cfg,
+                pending_kei_file,
+            )
+            .await
+            {
                 Ok(sse_stream) => {
                     events.attach_sse(sse_stream);
                 }
@@ -115,8 +136,18 @@ async fn run_app(
                         break;
                     }
                     KeyAction::Connect => {
+                        let pending_kei_file = app.pending_key_file.clone();
                         if let Some((server_url, user_id)) = app.start_connect() {
-                            match try_connect(&mut app, &server_url, &user_id, &cfg.room_path, &cfg).await {
+                            match try_connect(
+                                &mut app,
+                                &server_url,
+                                &user_id,
+                                &cfg.room_path,
+                                &cfg,
+                                pending_kei_file,
+                            )
+                            .await
+                            {
                                 Ok(sse_stream) => {
                                     events.attach_sse(sse_stream);
                                 }
@@ -153,9 +184,10 @@ async fn run_app(
                         app.connected();
                         // Auto-send Join action so the server adds us to room.state
                         if let (Some(ref client), Some(uid)) = (&app.client, user_id) {
-                            let join_action = ActionData::RoomAction(RoomActionData::Join(JoinRoom {
-                                nickname: uid,
-                            }));
+                            let nickname =
+                                app.pending_nickname.clone().unwrap_or_else(|| uid.clone());
+                            let join_action =
+                                ActionData::RoomAction(RoomActionData::Join(JoinRoom { nickname }));
                             if let Err(e) = client.send_action(join_action).await {
                                 tracing::warn!("Failed to send Join action: {:#}", e);
                             }
@@ -172,9 +204,10 @@ async fn run_app(
                         app.reconnected();
                         // Re-send Join to tell server we're back
                         if let (Some(ref client), Some(uid)) = (&app.client, user_id) {
-                            let join_action = ActionData::RoomAction(RoomActionData::Join(JoinRoom {
-                                nickname: uid,
-                            }));
+                            let nickname =
+                                app.pending_nickname.clone().unwrap_or_else(|| uid.clone());
+                            let join_action =
+                                ActionData::RoomAction(RoomActionData::Join(JoinRoom { nickname }));
                             if let Err(e) = client.send_action(join_action).await {
                                 tracing::warn!("Failed to send Join action on reconnect: {:#}", e);
                             }
@@ -238,10 +271,7 @@ async fn run_app(
                             if rs.last_error.is_none() {
                                 rs.last_error = Some("Connection closed".to_string());
                             }
-                            tracing::warn!(
-                                "Reconnect attempt {} failed",
-                                rs.attempts
-                            );
+                            tracing::warn!("Reconnect attempt {} failed", rs.attempts);
                         }
                     }
                     _ => {}
@@ -259,12 +289,25 @@ async fn run_app(
                         let server_url = rs.server_url.clone();
                         let room_path = rs.room_path.clone();
                         let user_id = rs.game_state.my_user_id.clone();
+                        let key_file = app
+                            .pending_key_file
+                            .clone()
+                            .or_else(|| cfg.key_file.clone());
                         tracing::info!(
                             "Reconnection attempt {}/{}",
                             rs.attempts + 1,
                             rs.max_attempts,
                         );
-                        match try_connect(&mut app, &server_url, &user_id, &room_path, &cfg).await {
+                        match try_connect(
+                            &mut app,
+                            &server_url,
+                            &user_id,
+                            &room_path,
+                            &cfg,
+                            key_file,
+                        )
+                        .await
+                        {
                             Ok(sse_stream) => {
                                 events.attach_sse(sse_stream);
                             }
@@ -303,13 +346,12 @@ async fn try_connect(
     user_id: &str,
     room_path: &str,
     cfg: &TuiConfig,
+    key_file_override: Option<String>,
 ) -> Result<impl futures::Stream<Item = Result<SseEvent>> + Send + 'static> {
-    let client = if let Some(ref key_file_path) = cfg.key_file {
+    let key_file_path = key_file_override.or_else(|| cfg.key_file.clone());
+    let client = if let Some(ref key_file_path) = key_file_path {
         // Key-file mode: load/create identity, run challenge-response auth
-        let nickname = cfg
-            .nickname
-            .clone()
-            .unwrap_or_else(|| "player".to_string());
+        let nickname = cfg.nickname.clone().unwrap_or_else(|| "player".to_string());
         let key_pair = if std::path::Path::new(key_file_path).exists() {
             openplay_client::KeyPair::load(std::path::Path::new(key_file_path))?
         } else {
@@ -330,10 +372,7 @@ async fn try_connect(
         // Lobby-entered user_id with no key_file configured:
         // Try to auto-load from the default identity directory, or use user_id as-is (legacy).
         let default_dir = openplay_client::default_user_dir()?;
-        let nickname = cfg
-            .nickname
-            .clone()
-            .unwrap_or_else(|| user_id.to_string());
+        let nickname = cfg.nickname.clone().unwrap_or_else(|| user_id.to_string());
         match load_or_create(&default_dir, &nickname) {
             Ok(key_pair) => {
                 let actual_user_id = key_pair.user_id().to_string();

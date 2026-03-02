@@ -129,6 +129,6 @@ pub async fn authenticate(base_url: &str, key_pair: &KeyPair) -> Result<String, 
         AuthError::InvalidResponse(format!("verify 响应解析失败: {}", e))
     })?;
 
-    tracing::info!("认证成功，user_id={}", user_id);
+    tracing::info!("verification succeeded={}", user_id);
     Ok(verify_resp.token)
 }

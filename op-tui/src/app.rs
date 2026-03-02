@@ -14,7 +14,9 @@ use openplay_basic::{
 use openplay_doudizhu::{self as ddz, DouDizhuGame};
 use openplay_poker::Card;
 
+use crate::i18n;
 use crate::log_buffer::LogBuffer;
+use crate::user_identity::{create_identity, delete_identity, load_identities, IdentityProfile};
 
 /// What the main loop should do after handling a key event.
 pub enum KeyAction {
@@ -38,6 +40,7 @@ pub enum Screen {
     /// Reconnecting after a disconnect during an active game.
     /// Preserves the GameState so the user can see the last known state.
     Reconnecting(ReconnectingState),
+    UserManager(UserManagerState),
 }
 
 /// State for the reconnecting screen.
@@ -74,6 +77,22 @@ pub struct LobbyState {
     /// Which field is focused: 0 = server_url, 1 = user_id
     pub focus: usize,
     pub error_message: Option<String>,
+    pub selected_identity: Option<IdentityProfile>,
+}
+
+pub struct UserManagerState {
+    pub profiles: Vec<IdentityProfile>,
+    pub selected: usize,
+    pub input: String,
+    pub mode: UserManagerMode,
+    pub error_message: Option<String>,
+    pub previous_screen: Box<Screen>,
+}
+
+pub enum UserManagerMode {
+    Browse,
+    Create,
+    DeleteConfirm,
 }
 
 /// In-game state.
@@ -191,6 +210,14 @@ pub struct App {
     /// User ID for the pending/active connection, stored so we can transition
     /// from Connecting -> Game when ServerConnected arrives.
     pub pending_user_id: Option<String>,
+    /// Key file to use for the pending connection (selected identity)
+    pub pending_key_file: Option<String>,
+    /// Nickname to use for Join (from identity file)
+    pub pending_nickname: Option<String>,
+    /// Key file used for the current session (for reconnect)
+    pub current_key_file: Option<String>,
+    /// Nickname used for the current session (for reconnect)
+    pub current_nickname: Option<String>,
     /// In-memory log buffer for the TUI log panel.
     pub log_buffer: LogBuffer,
     /// Current log panel display mode.
@@ -201,15 +228,27 @@ pub struct App {
 
 impl App {
     pub fn new(server_url: String, user_id: Option<String>, log_buffer: LogBuffer) -> Self {
+        let (selected_identity, user_id_value) = if let Some(uid) = user_id {
+            (None, uid)
+        } else if let Some(profile) = default_identity() {
+            (Some(profile.clone()), profile.user_id.clone())
+        } else {
+            (None, String::new())
+        };
         Self {
             screen: Screen::Lobby(LobbyState {
                 server_url,
-                user_id: user_id.unwrap_or_default(),
-                focus: 1,
+                user_id: user_id_value,
+                focus: 0,
                 error_message: None,
+                selected_identity,
             }),
             client: None,
             pending_user_id: None,
+            pending_key_file: None,
+            pending_nickname: None,
+            current_key_file: None,
+            current_nickname: None,
             log_buffer,
             log_mode: LogMode::Off,
             log_scroll: 0,
@@ -283,6 +322,14 @@ impl App {
             return KeyAction::Quit;
         }
 
+        // Global: Ctrl+U opens user manager
+        if key.code == KeyCode::Char('u') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if !matches!(self.screen, Screen::UserManager(_)) {
+                self.open_user_manager();
+            }
+            return KeyAction::None;
+        }
+
         // Global: F12 toggles log panel mode (Off -> Panel -> Fullscreen -> Off)
         if key.code == KeyCode::F(12) {
             self.log_mode = match self.log_mode {
@@ -354,6 +401,10 @@ impl App {
                 }
             }
             Screen::Game(gs) => handle_game_key(gs, key),
+            Screen::UserManager(_) => {
+                self.handle_user_manager_key_event(key);
+                KeyAction::None
+            }
         }
     }
 
@@ -365,6 +416,14 @@ impl App {
             }
             let result = (lobby.server_url.clone(), lobby.user_id.clone());
             self.pending_user_id = Some(lobby.user_id.clone());
+            self.pending_nickname = lobby
+                .selected_identity
+                .as_ref()
+                .map(|profile| profile.nickname.clone());
+            self.pending_key_file = lobby
+                .selected_identity
+                .as_ref()
+                .map(|profile| profile.path.to_string_lossy().to_string());
             self.screen = Screen::Connecting;
             Some(result)
         } else {
@@ -377,44 +436,41 @@ impl App {
         if let Some(user_id) = self.pending_user_id.take() {
             self.screen = Screen::Game(GameState::new(&user_id));
         }
+        self.current_key_file = self.pending_key_file.take();
+        self.current_nickname = self.pending_nickname.take();
     }
 
     /// Handle connection failure, go back to lobby with error message.
     pub fn connection_failed(&mut self, error: String) {
         self.pending_user_id = None;
-        self.screen = Screen::Lobby(LobbyState {
-            server_url: String::new(),
-            user_id: String::new(),
-            focus: 0,
-            error_message: Some(error),
-        });
+        self.pending_key_file = None;
+        self.pending_nickname = None;
+        self.current_key_file = None;
+        self.current_nickname = None;
+        self.screen = Screen::Lobby(make_lobby_state(String::new(), Some(error)));
     }
 
     /// Cancel an in-progress connection or disconnect from game. Returns to lobby.
     pub fn go_to_lobby(&mut self, error: Option<String>) {
         self.pending_user_id = None;
+        self.pending_key_file = None;
+        self.pending_nickname = None;
+        self.current_key_file = None;
+        self.current_nickname = None;
         self.client = None;
-        self.screen = Screen::Lobby(LobbyState {
-            server_url: String::new(),
-            user_id: String::new(),
-            focus: 0,
-            error_message: error,
-        });
+        self.screen = Screen::Lobby(make_lobby_state(String::new(), error));
     }
 
     /// Enter reconnecting state, preserving game state for display.
     /// Returns (server_url, user_id, room_path) for the caller to initiate reconnection.
     pub fn go_to_reconnecting(&mut self, server_url: String, room_path: String) {
         self.client = None;
+        self.pending_key_file = self.current_key_file.clone();
+        self.pending_nickname = self.current_nickname.clone();
         // Take the GameState out of Screen::Game
         let old_screen = std::mem::replace(
             &mut self.screen,
-            Screen::Lobby(LobbyState {
-                server_url: String::new(),
-                user_id: String::new(),
-                focus: 0,
-                error_message: None,
-            }),
+            Screen::Lobby(make_lobby_state(String::new(), None)),
         );
         if let Screen::Game(gs) = old_screen {
             self.screen = Screen::Reconnecting(ReconnectingState {
@@ -433,15 +489,51 @@ impl App {
     pub fn reconnected(&mut self) {
         let old_screen = std::mem::replace(
             &mut self.screen,
-            Screen::Lobby(LobbyState {
-                server_url: String::new(),
-                user_id: String::new(),
-                focus: 0,
-                error_message: None,
-            }),
+            Screen::Lobby(make_lobby_state(String::new(), None)),
         );
         if let Screen::Reconnecting(rs) = old_screen {
             self.screen = Screen::Game(rs.game_state);
+        }
+        self.pending_key_file = None;
+        self.pending_nickname = None;
+    }
+
+    fn open_user_manager(&mut self) {
+        let profiles = load_identities().unwrap_or_default();
+        let selected_identity = match &self.screen {
+            Screen::Lobby(lobby) => lobby
+                .selected_identity
+                .as_ref()
+                .map(|profile| profile.user_id.clone()),
+            _ => None,
+        };
+        let selected = selected_identity
+            .and_then(|uid| profiles.iter().position(|p| p.user_id == uid))
+            .unwrap_or(0);
+        let previous_screen = Box::new(std::mem::replace(
+            &mut self.screen,
+            Screen::Lobby(make_lobby_state(String::new(), None)),
+        ));
+        self.screen = Screen::UserManager(UserManagerState {
+            profiles,
+            selected,
+            input: String::new(),
+            mode: UserManagerMode::Browse,
+            error_message: None,
+            previous_screen,
+        });
+    }
+
+    fn handle_user_manager_key_event(&mut self, key: KeyEvent) {
+        let screen = std::mem::replace(
+            &mut self.screen,
+            Screen::Lobby(make_lobby_state(String::new(), None)),
+        );
+        if let Screen::UserManager(mut um) = screen {
+            let next_screen = handle_user_manager_key(&mut um, key);
+            self.screen = next_screen.unwrap_or(Screen::UserManager(um));
+        } else {
+            self.screen = screen;
         }
     }
 }
@@ -456,22 +548,180 @@ fn handle_lobby_key(lobby: &mut LobbyState, key: KeyEvent) {
             lobby.focus = if lobby.focus == 0 { 1 } else { 0 };
         }
         KeyCode::Char(c) => {
-            let field = if lobby.focus == 0 {
-                &mut lobby.server_url
+            if lobby.focus == 0 {
+                lobby.server_url.push(c);
             } else {
-                &mut lobby.user_id
-            };
-            field.push(c);
+                if lobby.selected_identity.take().is_some() {
+                    lobby.user_id.clear();
+                }
+                lobby.user_id.push(c);
+            }
         }
         KeyCode::Backspace => {
-            let field = if lobby.focus == 0 {
-                &mut lobby.server_url
+            if lobby.focus == 0 {
+                lobby.server_url.pop();
             } else {
-                &mut lobby.user_id
-            };
-            field.pop();
+                if lobby.selected_identity.take().is_some() {
+                    lobby.user_id.clear();
+                } else {
+                    lobby.user_id.pop();
+                }
+            }
         }
         _ => {}
+    }
+}
+
+fn handle_user_manager_key(um: &mut UserManagerState, key: KeyEvent) -> Option<Screen> {
+    let mut next_screen: Option<Screen> = None;
+    match um.mode {
+        UserManagerMode::Browse => match key.code {
+            KeyCode::Esc => {
+                let previous = std::mem::replace(
+                    &mut um.previous_screen,
+                    Box::new(Screen::Lobby(make_lobby_state(String::new(), None))),
+                );
+                next_screen = Some(*previous);
+            }
+            KeyCode::Up => {
+                if um.selected > 0 {
+                    um.selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if um.selected + 1 < um.profiles.len() {
+                    um.selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(profile) = um.profiles.get(um.selected).cloned() {
+                    if let Screen::Lobby(ref mut lobby) = um.previous_screen.as_mut() {
+                        lobby.selected_identity = Some(profile.clone());
+                        lobby.user_id = profile.user_id.clone();
+                    }
+                    let previous = std::mem::replace(
+                        &mut um.previous_screen,
+                        Box::new(Screen::Lobby(make_lobby_state(String::new(), None))),
+                    );
+                    next_screen = Some(*previous);
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') => {
+                um.mode = UserManagerMode::Create;
+                um.input.clear();
+                um.error_message = None;
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                if !um.profiles.is_empty() {
+                    um.mode = UserManagerMode::DeleteConfirm;
+                }
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => match load_identities() {
+                Ok(profiles) => {
+                    um.profiles = profiles;
+                    um.selected = um.selected.min(um.profiles.len().saturating_sub(1));
+                    um.error_message = None;
+                }
+                Err(err) => um.error_message = Some(err),
+            },
+            _ => {}
+        },
+        UserManagerMode::Create => match key.code {
+            KeyCode::Esc => {
+                um.mode = UserManagerMode::Browse;
+                um.input.clear();
+            }
+            KeyCode::Enter => {
+                let nickname = um.input.trim();
+                if nickname.is_empty() {
+                    um.error_message = Some(i18n::t("user-manager-nickname-required"));
+                } else {
+                    match create_identity(nickname) {
+                        Ok(profile) => {
+                            let new_user_id = profile.user_id.clone();
+                            um.profiles.push(profile);
+                            um.profiles.sort_by(|a, b| {
+                                a.nickname.cmp(&b.nickname).then(a.user_id.cmp(&b.user_id))
+                            });
+                            um.selected = um
+                                .profiles
+                                .iter()
+                                .position(|p| p.user_id == new_user_id)
+                                .unwrap_or(0);
+                            um.mode = UserManagerMode::Browse;
+                            um.input.clear();
+                            um.error_message = None;
+                        }
+                        Err(err) => um.error_message = Some(err),
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                um.input.pop();
+            }
+            KeyCode::Char(c) => {
+                um.input.push(c);
+            }
+            _ => {}
+        },
+        UserManagerMode::DeleteConfirm => match key.code {
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                um.mode = UserManagerMode::Browse;
+            }
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let Some(profile) = um.profiles.get(um.selected).cloned() {
+                    let deleted_user_id = profile.user_id.clone();
+                    match delete_identity(&profile.path) {
+                        Ok(_) => {
+                            um.profiles.remove(um.selected);
+                            if let Screen::Lobby(ref mut lobby) = um.previous_screen.as_mut() {
+                                if lobby
+                                    .selected_identity
+                                    .as_ref()
+                                    .is_some_and(|p| p.user_id == deleted_user_id)
+                                {
+                                    lobby.selected_identity = None;
+                                    lobby.user_id.clear();
+                                }
+                            }
+                            if um.selected >= um.profiles.len() && !um.profiles.is_empty() {
+                                um.selected = um.profiles.len() - 1;
+                            }
+                            um.mode = UserManagerMode::Browse;
+                            um.error_message = None;
+                        }
+                        Err(err) => um.error_message = Some(err),
+                    }
+                } else {
+                    um.mode = UserManagerMode::Browse;
+                }
+            }
+            _ => {}
+        },
+    }
+
+    next_screen
+}
+
+fn default_identity() -> Option<IdentityProfile> {
+    load_identities().ok().and_then(|mut profiles| {
+        profiles.sort_by(|a, b| a.nickname.cmp(&b.nickname).then(a.user_id.cmp(&b.user_id)));
+        profiles.into_iter().next()
+    })
+}
+
+fn make_lobby_state(server_url: String, error_message: Option<String>) -> LobbyState {
+    let selected_identity = default_identity();
+    let user_id = selected_identity
+        .as_ref()
+        .map(|profile| profile.user_id.clone())
+        .unwrap_or_default();
+    LobbyState {
+        server_url,
+        user_id,
+        focus: 0,
+        error_message,
+        selected_identity,
     }
 }
 

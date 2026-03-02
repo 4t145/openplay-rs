@@ -1,6 +1,15 @@
 [workspace]
 resolver = "2"
-members = ["games/*", "models/*", "host", "user-agents/*", "client", "op-host", "op-tui"]
+members = [
+    "games/*",
+    "models/*",
+    "host",
+    "user-agents/*",
+    "client",
+    "op-host",
+    "op-tui",
+    "ui/godot/rust_ext",
+]
 
 [workspace.metadata]
 

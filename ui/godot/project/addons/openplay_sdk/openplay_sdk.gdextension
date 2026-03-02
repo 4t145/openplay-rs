@@ -1,0 +1,7 @@
+[configuration]
+entry_symbol = "gdextension_init"
+compatibility_minimum = "4.1"
+
+[libraries]
+linux.x86_64 = "res://addons/openplay_sdk/bin/libopenplay_sdk.so"
+windows.x86_64 = "res://addons/openplay_sdk/bin/openplay_sdk.dll"
