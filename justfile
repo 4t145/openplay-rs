@@ -29,5 +29,8 @@ godot-sync-release-linux:
 godot-clean:
     cargo clean -p openplay_sdk
 
+godot-import:
+    "ui/godot/project/tools/Godot_v4.6.1-stable_linux.x86_64" --path "ui/godot/project" --headless --editor --quit
+
 godot-run:
     "ui/godot/project/tools/Godot_v4.6.1-stable_linux.x86_64" --path "ui/godot/project"

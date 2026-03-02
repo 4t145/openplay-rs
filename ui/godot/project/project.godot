@@ -6,7 +6,7 @@ config_version=5
 [application]
 
 config/name="OpenPlay"
-run/main_scene="res://scenes/Main.tscn"
+run/main_scene="res://scenes/GameRoom.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 
 [display]
