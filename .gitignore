@@ -5,3 +5,5 @@
 *.dll
 *.exe
 *.log
+
+.vscode
