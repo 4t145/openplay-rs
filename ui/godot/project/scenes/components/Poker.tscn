@@ -1,6 +1,0 @@
-[gd_scene format=3 uid="uid://b01dff7x30pwo"]
-
-[ext_resource type="Texture2D" uid="uid://d26pa8agakfbl" path="res://assets/cardsLarge_tilemap.png" id="1_rltc2"]
-
-[node name="Poker" type="TextureRect" unique_id=1558522800]
-texture = ExtResource("1_rltc2")
