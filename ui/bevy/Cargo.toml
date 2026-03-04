@@ -3,7 +3,18 @@ name = "op-bevy"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 [dependencies]
-bevy = { version = "0.18", features = ["bevy_remote"] }
-fontdue = "0.9.3"
-openplay-poker = { workspace = true }
+bevy = { version = "0.18", features = ["webgl2"] }
+openplay-poker = { workspace = true, default-features = false }
+
+
+wasm-bindgen = "0.2"
+
+[target.wasm32-unknown-unknown]
+runner = "wasm-server-runner"

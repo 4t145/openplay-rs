@@ -4,7 +4,6 @@ use bevy::{
     window::PrimaryWindow,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-use fontdue::{Font, FontSettings};
 use openplay_poker::{Card, Rank, Suit};
 use std::sync::OnceLock;
 

@@ -1,5 +1,4 @@
-use rand::rng;
-use rand::seq::SliceRandom;
+
 use serde::{Deserialize, Serialize};
 
 pub mod fmt;
@@ -112,7 +111,10 @@ impl Deck {
         deck.cards.push(Card::WildCard);
         deck
     }
+    #[cfg(feature = "rand")]
     pub fn shuffle(&mut self) {
+        use rand::rng;
+        use rand::seq::SliceRandom;
         let mut rng = rng();
         self.cards.shuffle(&mut rng);
     }

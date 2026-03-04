@@ -1,0 +1,53 @@
+{
+  "name": "op-tauvy",
+  "version": "0.1.0",
+  "description": "",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "tauri": "tauri",
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write ."
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@lucide/svelte": "^0.577.0",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-opener": "^2.5.3",
+    "op-bevy": "./../bevy/pkg",
+    "op-bevy": "./../bevy/pkg"
+  },
+  "devDependencies": {
+    "@eslint/compat": "^2.0.2",
+    "@eslint/js": "^9.39.3",
+    "@inlang/paraglide-js": "^2.13.1",
+    "@skeletonlabs/skeleton": "^4.12.1",
+    "@skeletonlabs/tw-plugin": "^0.4.1",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.53.4",
+    "@sveltejs/vite-plugin-svelte": "^5.1.1",
+    "@tailwindcss/forms": "^0.5.11",
+    "@tailwindcss/typography": "^0.5.14",
+    "@tailwindcss/vite": "^4.2.1",
+    "@tauri-apps/cli": "^2.10.1",
+    "@types/node": "^24.11.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.3",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-svelte": "^3.15.0",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1",
+    "prettier-plugin-svelte": "^3.5.1",
+    "prettier-plugin-tailwindcss": "^0.6.5",
+    "svelte": "^5.53.7",
+    "svelte-check": "^4.4.4",
+    "tailwindcss": "^4.2.1",
+    "typescript": "~5.6.3",
+    "typescript-eslint": "^8.56.1",
+    "vite": "^6.4.1"
+  }
+}

@@ -9,6 +9,7 @@ members = [
     "op-host",
     "op-tui",
     "ui/bevy",
+    "ui/tauvy/src-tauri",
 ]
 
 [workspace.metadata]
@@ -18,4 +19,4 @@ members = [
 rand = { version = "0.10" }
 serde = { version = "1", features = ["derive"] }
 openplay-basic = { path = "models/basic" }
-openplay-poker = { path = "models/poker" }
+openplay-poker = { path = "models/poker", default-features = false }
