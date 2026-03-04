@@ -4,4 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.18", features = []}
+bevy = { version = "0.18", features = ["bevy_remote"] }
+fontdue = "0.9.3"
+openplay-poker = { workspace = true }

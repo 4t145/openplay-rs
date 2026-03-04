@@ -18,3 +18,4 @@ members = [
 rand = { version = "0.10" }
 serde = { version = "1", features = ["derive"] }
 openplay-basic = { path = "models/basic" }
+openplay-poker = { path = "models/poker" }
