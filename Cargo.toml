@@ -9,7 +9,6 @@ members = [
     "op-host",
     "op-tui",
     "ui/bevy",
-    "ui/tauvy/src-tauri",
 ]
 
 [workspace.metadata]

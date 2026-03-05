@@ -1,5 +1,6 @@
 use crate::AppState;
 use crate::game_components::poker::{PokerCard, PokerCardBundle};
+use crate::ui::Hud;
 use bevy::{asset, prelude::*};
 use openplay_poker::{Rank, Suit};
 
@@ -130,24 +131,13 @@ fn setup_preview(
         }
     }
 
-    // Instructions
     commands.spawn((
-        Text::new("Press 'ESC' to return"),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(10.0),
-            left: Val::Px(10.0),
-            ..default()
-        },
-        PokerPreviewScene,
-    ));
-
-    commands.spawn((
+        Hud,
         Node {
             width: percent(100),
             height: percent(100),
             align_items: AlignItems::FlexStart,
-            justify_content: JustifyContent::Center,
+            justify_content: JustifyContent::FlexEnd,
             ..default()
         },
         children![(
@@ -175,9 +165,9 @@ fn setup_preview(
                 },
                 TextColor(Color::srgb(0.9, 0.9, 0.9)),
                 TextShadow::default(),
-            )]),
-        ],
-        PokerPreviewScene
+            )]
+        ),],
+        PokerPreviewScene,
     ));
 }
 
