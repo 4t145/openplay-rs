@@ -57,6 +57,7 @@ pub struct TextUiButton<'c> {
     pub text: &'c str,
     pub node_width: Val,
     pub node_height: Val,
+
 }
 
 impl<'c>  TextUiButton<'c> {

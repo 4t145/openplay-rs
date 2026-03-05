@@ -143,13 +143,41 @@ fn setup_preview(
     ));
 
     commands.spawn((
-        super::button::TextUiButton {
-            text: "X",
-            node_width: Val::Px(30.0),
-            node_height: Val::Px(30.0),
-        }
-        .bundle(&asset_server),
-        PokerPreviewCloseButton,
+        Node {
+            width: percent(100),
+            height: percent(100),
+            align_items: AlignItems::FlexStart,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        children![(
+            PokerPreviewCloseButton,
+            Button,
+            Node {
+                width: Val::Px(30.0),
+                height: Val::Px(30.0),
+                border: UiRect::all(px(5)),
+                // horizontally center child text
+                justify_content: JustifyContent::Center,
+                // vertically center child text
+                align_items: AlignItems::Center,
+                border_radius: BorderRadius::MAX,
+                ..default()
+            },
+            BorderColor::all(Color::WHITE),
+            BackgroundColor(Color::BLACK),
+            children![(
+                Text::new("X"),
+                TextFont {
+                    font: asset_server.load("fonts/FiraSans-Black.ttf"),
+                    font_size: 33.0,
+                    ..default()
+                },
+                TextColor(Color::srgb(0.9, 0.9, 0.9)),
+                TextShadow::default(),
+            )]),
+        ],
+        PokerPreviewScene
     ));
 }
 
