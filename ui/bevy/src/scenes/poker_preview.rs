@@ -1,5 +1,6 @@
-use crate::AppState;
+use crate::MainState;
 use crate::game_components::poker::{PokerCard, PokerCardBundle};
+use crate::state::OverlayState;
 use crate::ui::Hud;
 use bevy::{asset, prelude::*};
 use openplay_poker::{Rank, Suit};
@@ -8,15 +9,15 @@ pub struct PokerPreviewPlugin;
 
 impl Plugin for PokerPreviewPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(AppState::PokerPreview), setup_preview)
-            .add_systems(OnExit(AppState::PokerPreview), cleanup_preview)
+        app.add_systems(OnEnter(OverlayState::Theme), setup_preview)
+            .add_systems(OnExit(OverlayState::Theme), cleanup_preview)
             .add_systems(
                 Update,
-                input_handler.run_if(in_state(AppState::PokerPreview)),
+                input_handler.run_if(in_state(OverlayState::Theme)),
             )
             .add_systems(
                 Update,
-                close_button_handler.run_if(in_state(AppState::PokerPreview)),
+                close_button_handler.run_if(in_state(OverlayState::Theme)),
             );
     }
 }
@@ -30,13 +31,6 @@ fn setup_preview(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut asset_server: ResMut<AssetServer>,
 ) {
-    // 3D Camera
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(0.0, 0.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
-        PokerPreviewScene,
-    ));
-
     // Lights
     commands.spawn((
         PointLight {
@@ -179,14 +173,14 @@ fn cleanup_preview(mut commands: Commands, query: Query<Entity, With<PokerPrevie
     }
 }
 
-fn input_handler(mut next_state: ResMut<NextState<AppState>>, input: Res<ButtonInput<KeyCode>>) {
+fn input_handler(mut next_state: ResMut<NextState<OverlayState>>, input: Res<ButtonInput<KeyCode>>) {
     if input.just_pressed(KeyCode::Escape) {
-        next_state.set(AppState::Game);
+        next_state.set(OverlayState::None);
     }
 }
 
 fn close_button_handler(
-    mut next_state: ResMut<NextState<AppState>>,
+    mut next_state: ResMut<NextState<OverlayState>>,
     mut interaction_query: Query<
         (&Interaction, &mut Button),
         (
@@ -198,7 +192,7 @@ fn close_button_handler(
 ) {
     for (interaction, mut button) in &mut interaction_query {
         if *interaction == Interaction::Pressed {
-            next_state.set(AppState::Game);
+            next_state.set(OverlayState::None);
             button.set_changed(); // Mark button as changed to update its state
         }
     }
