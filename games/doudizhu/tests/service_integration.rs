@@ -10,7 +10,7 @@ use std::{
 use bytes::Bytes;
 use openplay_basic::{
     data::Data,
-    game::GameViewUpdate,
+    game::{GameViewUpdate, PositionSpec},
     message::{DataType, TypedData},
     room::{Room, RoomEvent, RoomInfo, Update},
     user::{
@@ -158,9 +158,15 @@ async fn test_service_integration() {
         id: "room1".to_string(),
         owner: p1_id.clone(),
         endpoint: "ws://localhost".to_string(),
+        game_meta: game.meta(),
         game_config: None,
     };
-    let mut room = Room::new(room_info);
+    let mut room = Room::new_with_position_spec(
+        room_info,
+        &PositionSpec::Fixed {
+            positions: vec!["1".into(), "2".into(), "3".into()],
+        },
+    );
 
     // Add other players to the room state manually for test (usually join via connection)
     // We mock room state here
@@ -168,8 +174,8 @@ async fn test_service_integration() {
 
     // Helper to add player
     let mut add_player = |p: User, i: usize| {
-        room.state.players.insert(
-            RoomPlayerPosition::from(i.to_string()),
+        room.state.set_player_state(
+            RoomPlayerPosition::from((i + 1).to_string()),
             RoomPlayerState {
                 id_ready: false, // Start unready
                 is_connected: true,
@@ -187,13 +193,11 @@ async fn test_service_integration() {
 
     // Also mark p2 and p3 as READY. p1 will send ready via StartGameAgent.
     room.state
-        .players
-        .get_mut(&RoomPlayerPosition::from("1"))
+        .get_player_state_mut(&RoomPlayerPosition::from("2"))
         .unwrap()
         .id_ready = true;
     room.state
-        .players
-        .get_mut(&RoomPlayerPosition::from("2"))
+        .get_player_state_mut(&RoomPlayerPosition::from("3"))
         .unwrap()
         .id_ready = true;
 

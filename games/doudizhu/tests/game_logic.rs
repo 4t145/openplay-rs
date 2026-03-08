@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use openplay_basic::data::Data;
-use openplay_basic::game::{Game, GameEvent, SequencedGameUpdate};
+use openplay_basic::game::{Game, GameEvent, PositionSpec, SequencedGameUpdate};
 use openplay_basic::message::{App, DataType, TypedData};
 use openplay_basic::room::{Room, RoomContext, RoomInfo, RoomPlayerPosition, RoomPlayerState};
 use openplay_basic::user::{
@@ -60,12 +60,18 @@ fn make_room_context(players: &[User]) -> RoomContext {
         id: "test".to_string(),
         owner: owner.id.clone(),
         endpoint: "test://".to_string(),
+        game_meta: DouDizhuGame::new(vec![]).meta(),
         game_config: None,
     };
-    let mut room = Room::new(room_info);
+    let mut room = Room::new_with_position_spec(
+        room_info,
+        &PositionSpec::Fixed {
+            positions: vec!["1".into(), "2".into(), "3".into()],
+        },
+    );
     for (i, p) in players.iter().enumerate() {
-        room.state.players.insert(
-            RoomPlayerPosition::from(i.to_string()),
+        room.state.set_player_state(
+            RoomPlayerPosition::from((i + 1).to_string()),
             RoomPlayerState {
                 id_ready: true,
                 is_connected: true,

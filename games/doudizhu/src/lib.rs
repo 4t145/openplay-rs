@@ -6,7 +6,7 @@ use bytes::Bytes;
 use openplay_basic::data::Data;
 use openplay_basic::game::{
     ClientEvent, Game, GameCommand, GameEvent, GameMeta, GameState, GameUpdate, GameViewUpdate, Id,
-    SequencedGameUpdate, TimeExpired,
+    PositionSpec, SequencedGameUpdate, TimeExpired,
 };
 use openplay_basic::message::{App, DataType, TypedData};
 use openplay_basic::room::{RoomContext, RoomPlayerPosition, RoomView};
@@ -645,6 +645,9 @@ impl Game for DouDizhuGame {
         GameMeta {
             app: get_app(),
             description: "Classic Chinese card game for 3 players".to_string(),
+            position_spec: PositionSpec::Fixed {
+                positions: vec!["1".into(), "2".into(), "3".into()],
+            },
         }
     }
 
@@ -791,7 +794,7 @@ impl DouDizhuGame {
 
         // 1. Player Views
         for (i, _) in self.players.iter().enumerate() {
-            let pos = RoomPlayerPosition::from(i.to_string());
+            let pos = RoomPlayerPosition::from((i + 1).to_string());
             let view_state = GameState {
                 version: self.version,
                 data: self.masked_snapshot(Some(i)),

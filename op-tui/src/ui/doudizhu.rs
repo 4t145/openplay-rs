@@ -128,7 +128,7 @@ fn draw_waiting(f: &mut Frame, gs: &GameState, area: Rect) {
 
     // --- Room title & info ---
     let room_title = if let Some(ref room) = gs.room {
-        let player_count = room.state.players.len();
+        let player_count = room.state.player_count();
         let args = fluent_args!["count" => player_count as i64];
         vec![
             Line::from(Span::styled(
@@ -172,7 +172,7 @@ fn draw_waiting(f: &mut Frame, gs: &GameState, area: Rect) {
         let seat_label = i18n::t_args("room-seat", &args);
 
         if let Some(ref room) = gs.room {
-            if let Some(player_state) = room.state.players.get(&pos) {
+            if let Some(player_state) = room.state.get_player_state(&pos) {
                 // Seat occupied
                 let name = &player_state.player.nickname;
                 let is_bot = player_state.player.is_bot;

@@ -1,4 +1,4 @@
-use crate::{GlobalAssets, MainState, data::CurrentUserInfo, state::OverlayState, ui::Hud};
+use crate::{GlobalAssets, MainState, data::CurrentUserInfo, state::OverlayState, ui::Ui};
 use bevy::prelude::*;
 /*
 
@@ -7,32 +7,32 @@ use bevy::prelude::*;
 
 */
 #[derive(Component)]
-pub struct GeneralHud; // Tag for cleanup
+pub struct GeneralUi; // Tag for cleanup
 
 #[derive(Component)]
-pub struct GeneralHudRoot;
+pub struct GeneralUiRoot;
 
 #[derive(Component)]
-pub struct GeneralHudTopBar;
+pub struct GeneralUiTopBar;
 
 #[derive(Component)]
-pub struct GeneralHudTopBarLeftGroup;
+pub struct GeneralUiTopBarLeftGroup;
 
 #[derive(Component)]
-pub struct GeneralHudTopBarRightGroup;
+pub struct GeneralUiTopBarRightGroup;
 
 #[derive(Component)]
-pub struct GeneralHudPlayerAvatar;
+pub struct GeneralUiPlayerAvatar;
 
 #[derive(Component)]
-pub struct GeneralHudPlayerUsername;
+pub struct GeneralUiPlayerUsername;
 
 #[derive(Component)]
-pub struct GeneralHudThemeButton;
+pub struct GeneralUiThemeButton;
 #[derive(Component)]
-pub struct GeneralHudSettingsButton;
+pub struct GeneralUiSettingsButton;
 #[derive(Component)]
-pub struct GeneralHudMenuButton;
+pub struct GeneralUiMenuButton;
 pub fn button_icon(image: Handle<Image>, color: Color) -> impl Bundle {
     (
         ImageNode {
@@ -76,9 +76,9 @@ pub fn setup_general_hud(
         .map(|user| user.nickname.clone())
         .unwrap_or_else(|| "<anon>".to_string());
     let general_hud_entity = (
-        GeneralHud,
-        GeneralHudRoot,
-        Hud,
+        GeneralUi,
+        GeneralUiRoot,
+        Ui,
         Visibility::Visible,
         Node {
             width: percent(100),
@@ -89,7 +89,7 @@ pub fn setup_general_hud(
             ..Default::default()
         },
         children![(
-            GeneralHudTopBar,
+            GeneralUiTopBar,
             Node {
                 width: percent(100),
                 height: Val::Px(50.0),
@@ -99,7 +99,7 @@ pub fn setup_general_hud(
             },
             children![
                 (
-                    GeneralHudTopBarLeftGroup,
+                    GeneralUiTopBarLeftGroup,
                     Node {
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::FlexStart,
@@ -108,14 +108,14 @@ pub fn setup_general_hud(
                     },
                     children![
                         (
-                            GeneralHudPlayerAvatar,
+                            GeneralUiPlayerAvatar,
                             ImageNode {
                                 color: Color::WHITE,
                                 ..Default::default()
                             }
                         ),
                         (
-                            GeneralHudPlayerUsername,
+                            GeneralUiPlayerUsername,
                             Text::new(current_user_name),
                             TextFont {
                                 font: asset_server.load("fonts/FiraSans-Black.ttf"),
@@ -127,19 +127,19 @@ pub fn setup_general_hud(
                     ]
                 ),
                 (
-                    GeneralHudTopBarRightGroup,
+                    GeneralUiTopBarRightGroup,
                     Node {
                         align_items: AlignItems::Center,
                         justify_content: JustifyContent::FlexEnd,
                         ..Default::default()
                     },
                     children![
-                        functional_button(GeneralHudThemeButton, global_assets.icon_dice.clone()),
+                        functional_button(GeneralUiThemeButton, global_assets.icon_dice.clone()),
                         functional_button(
-                            GeneralHudSettingsButton,
+                            GeneralUiSettingsButton,
                             global_assets.icon_settings.clone()
                         ),
-                        functional_button(GeneralHudMenuButton, global_assets.icon_menu.clone()),
+                        functional_button(GeneralUiMenuButton, global_assets.icon_menu.clone()),
                     ]
                 )
             ]
@@ -147,7 +147,7 @@ pub fn setup_general_hud(
     );
     commands.spawn(general_hud_entity);
 }
-fn clean_up_general_hud(mut commands: Commands, query: Query<Entity, With<GeneralHud>>) {
+fn clean_up_general_hud(mut commands: Commands, query: Query<Entity, With<GeneralUi>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }
@@ -160,7 +160,7 @@ fn general_hud_input_handler(
 
 fn general_hud_theme_button_handler(
     mut next_state: ResMut<NextState<OverlayState>>,
-    interaction: Query<(&Interaction, &Button, &GeneralHudThemeButton)>,
+    interaction: Query<(&Interaction, &Button, &GeneralUiThemeButton)>,
 ) {
     for (interaction, _, _) in interaction.iter() {
         if *interaction == Interaction::Pressed {
@@ -171,7 +171,7 @@ fn general_hud_theme_button_handler(
 
 fn general_hud_menu_button_handler(
     mut next_state: ResMut<NextState<OverlayState>>,
-    interaction: Query<(&Interaction, &Button, &GeneralHudMenuButton)>,
+    interaction: Query<(&Interaction, &Button, &GeneralUiMenuButton)>,
 ) {
     for (interaction, _, _) in interaction.iter() {
         if *interaction == Interaction::Pressed {
@@ -181,10 +181,10 @@ fn general_hud_menu_button_handler(
 }
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub struct GeneralHudInputSystemSet;
-pub struct GeneralHudPlugin;
+pub struct GeneralUiInputSystemSet;
+pub struct GeneralUiPlugin;
 
-impl Plugin for GeneralHudPlugin {
+impl Plugin for GeneralUiPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CurrentUserInfo { user: None });
         app.add_systems(
@@ -194,7 +194,7 @@ impl Plugin for GeneralHudPlugin {
                 general_hud_menu_button_handler,
                 general_hud_input_handler,
             )
-                .in_set(GeneralHudInputSystemSet)
+                .in_set(GeneralUiInputSystemSet)
                 .run_if(in_state(OverlayState::None)),
         );
         app.add_systems(

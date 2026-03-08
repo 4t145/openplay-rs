@@ -189,7 +189,7 @@ impl GameState {
     /// Returns None if user is not seated or no room info.
     pub fn my_ready_state(&self) -> Option<bool> {
         let room = self.room.as_ref()?;
-        for ps in room.state.players.values() {
+        for (_, ps) in room.state.iter_players() {
             // UserId now serializes as a JSON string
             let player_id_str: String = serde_json::to_value(&ps.player.id)
                 .ok()
@@ -766,7 +766,7 @@ fn handle_game_key(gs: &mut GameState, key: KeyEvent) -> KeyAction {
         gs.add_bot_mode = false;
         match key.code {
             KeyCode::Char(c @ '1'..='3') => {
-                let seat = (c.to_digit(10).unwrap() - 1).to_string();
+                let seat = c.to_string();
                 return KeyAction::SendAction(ActionData::RoomAction(RoomActionData::RoomManage(
                     RoomManage::AddBot(AddBot {
                         position: RoomPlayerPosition::from(seat.as_str()),
@@ -783,11 +783,11 @@ fn handle_game_key(gs: &mut GameState, key: KeyEvent) -> KeyAction {
         gs.kick_mode = false;
         match key.code {
             KeyCode::Char(c @ '1'..='3') => {
-                let seat = (c.to_digit(10).unwrap() - 1).to_string();
+                let seat = c.to_string();
                 let pos = RoomPlayerPosition::from(seat.as_str());
                 // Find the player at this seat
                 if let Some(ref room) = gs.room {
-                    if let Some(player_state) = room.state.players.get(&pos) {
+                    if let Some(player_state) = room.state.get_player_state(&pos) {
                         return KeyAction::SendAction(ActionData::RoomAction(
                             RoomActionData::RoomManage(RoomManage::KickOut(KickOut {
                                 player: player_state.player.id.clone(),
@@ -846,7 +846,7 @@ fn handle_game_key(gs: &mut GameState, key: KeyEvent) -> KeyAction {
         match key.code {
             // 1-3: sit at seat (observer -> player)
             KeyCode::Char(c @ '1'..='3') => {
-                let seat = (c.to_digit(10).unwrap() - 1).to_string();
+                let seat = c.to_string();
                 return KeyAction::SendAction(ActionData::RoomAction(
                     RoomActionData::PositionChange(PositionChange {
                         from: RoomUserPosition::Observer(RoomObserverView::default()),

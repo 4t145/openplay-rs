@@ -111,7 +111,9 @@ impl RoomClient {
     /// 首先 yield [`SseEvent::Connected`] 表示连接已建立，
     /// 随后每次服务端推送均 yield [`SseEvent::Update`]。
     /// 连接关闭或出错时流结束。
-    pub fn connect_sse(&self) -> impl Stream<Item = Result<SseEvent, anyhow::Error>> + Send + 'static {
+    pub fn connect_sse(
+        &self,
+    ) -> impl Stream<Item = Result<SseEvent, anyhow::Error>> + Send + 'static + use<> {
         let url = self.url();
         let http = self.http.clone();
 

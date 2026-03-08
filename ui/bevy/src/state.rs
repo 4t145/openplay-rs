@@ -6,6 +6,7 @@ pub enum MainState {
     GlobalAssetsLoading,
     Lobby,
     ConnectingGameRoom,
+    ReconnectingGameRoom,
     GameRoom,
     GameLoading,
     Game,

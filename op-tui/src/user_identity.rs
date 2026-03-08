@@ -13,7 +13,7 @@ pub struct IdentityProfile {
 
 fn to_profile(path: PathBuf, key_pair: KeyPair) -> IdentityProfile {
     IdentityProfile {
-        nickname: key_pair.card.nickname.clone(),
+        nickname: key_pair.user.nickname.clone(),
         user_id: key_pair.user_id().to_string(),
         path,
     }

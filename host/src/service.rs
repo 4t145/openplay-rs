@@ -7,8 +7,8 @@ use openplay_basic::{
         TimeExpired,
     },
     room::{
-        Room, RoomEvent, RoomObserverState, RoomObserverView, RoomPhase, RoomPhaseKind,
-        RoomPlayerState, RoomUpdate, RoomUserPosition, UserActionEvent,
+        PositionMode, Room, RoomEvent, RoomObserverState, RoomObserverView, RoomPhase,
+        RoomPhaseKind, RoomPlayerState, RoomUpdate, RoomUserPosition, SeatState, UserActionEvent,
     },
     user::{
         Action, DynUserAgent, User, UserId,
@@ -287,7 +287,7 @@ impl RoomService {
         match action {
             RoomActionData::Join(join) => {
                 // Check if user is already in room (as player or observer)
-                let in_players = room.state.players.values().any(|p| p.player.id == *user_id);
+                let in_players = room.state.iter_players().any(|(_, p)| p.player.id == *user_id);
                 let in_observers = room.state.observers.contains_key(user_id);
 
                 if !in_players && !in_observers {
@@ -320,11 +320,10 @@ impl RoomService {
                     // User already in room (reconnect scenario): mark as connected and push current state
                     tracing::info!("User {} rejoined room (already present)", user_id);
                     // Mark user as connected
-                    if let Some(ps) = room
+                    if let Some((_, ps)) = room
                         .state
-                        .players
-                        .values_mut()
-                        .find(|ps| ps.player.id == *user_id)
+                        .iter_players_mut()
+                        .find(|(_, ps)| ps.player.id == *user_id)
                     {
                         ps.is_connected = true;
                     } else if let Some(os) = room.state.observers.get_mut(user_id) {
@@ -361,13 +360,17 @@ impl RoomService {
                     .await?;
             }
             RoomActionData::ChangeReadyState(change) => {
-                if let Some(player_state) = room
+                let mut changed_ready = false;
+                if let Some((_, player_state)) = room
                     .state
-                    .players
-                    .values_mut()
-                    .find(|state| state.player.id == *user_id)
+                    .iter_players_mut()
+                    .find(|(_, state)| state.player.id == *user_id)
                 {
                     player_state.id_ready = change.is_ready;
+                    changed_ready = true;
+                }
+
+                if changed_ready {
                     connection_controller
                         .broadcast_room_update(RoomUpdate {
                             room: room.clone(),
@@ -385,9 +388,8 @@ impl RoomService {
                     RoomUserPosition::Observer(_) => room.state.observers.contains_key(user_id),
                     RoomUserPosition::Player(pos) => room
                         .state
-                        .players
-                        .get(pos)
-                        .map_or(false, |p| p.player.id == *user_id),
+                        .get_player_state(pos)
+                        .is_some_and(|p| p.player.id == *user_id),
                 };
 
                 if !valid {
@@ -402,18 +404,22 @@ impl RoomService {
                 match (&change.from, &change.to) {
                     // Observer -> Player: sit down at a seat
                     (RoomUserPosition::Observer(_), RoomUserPosition::Player(target_pos)) => {
-                        // Check target seat is empty
-                        if room.state.players.contains_key(target_pos) {
+                        let is_vacant = room
+                            .state
+                            .positions
+                            .seats
+                            .get(target_pos)
+                            .is_some_and(|seat| matches!(seat, SeatState::Vacant));
+                        if !is_vacant {
                             tracing::warn!(
-                                "PositionChange: target seat {:?} is occupied",
+                                "PositionChange: target seat {:?} is not vacant",
                                 target_pos
                             );
                             return Ok(None);
                         }
                         // Remove from observers
                         if let Some(obs) = room.state.observers.remove(user_id) {
-                            // Insert as player
-                            room.state.players.insert(
+                            room.state.set_player_state(
                                 target_pos.clone(),
                                 RoomPlayerState {
                                     id_ready: false,
@@ -425,7 +431,7 @@ impl RoomService {
                     }
                     // Player -> Observer: stand up from a seat
                     (RoomUserPosition::Player(from_pos), RoomUserPosition::Observer(view)) => {
-                        if let Some(player_state) = room.state.players.remove(from_pos) {
+                        if let Some(player_state) = room.state.clear_position(from_pos) {
                             room.state.observers.insert(
                                 user_id.clone(),
                                 RoomObserverState {
@@ -436,19 +442,14 @@ impl RoomService {
                             );
                         }
                     }
-                    // Player -> Player: swap seats
+                    // Player -> Player: currently forbidden
                     (RoomUserPosition::Player(from_pos), RoomUserPosition::Player(target_pos)) => {
-                        // Check target seat is empty
-                        if room.state.players.contains_key(target_pos) {
-                            tracing::warn!(
-                                "PositionChange: target seat {:?} is occupied",
-                                target_pos
-                            );
-                            return Ok(None);
-                        }
-                        if let Some(player_state) = room.state.players.remove(from_pos) {
-                            room.state.players.insert(target_pos.clone(), player_state);
-                        }
+                        tracing::warn!(
+                            "PositionChange: Player->Player is forbidden (from {:?} to {:?})",
+                            from_pos,
+                            target_pos
+                        );
+                        return Ok(None);
                     }
                     // Observer -> Observer: not meaningful, ignore
                     _ => {
@@ -470,11 +471,10 @@ impl RoomService {
             RoomActionData::Leave => {
                 if is_gaming {
                     // During Gaming: mark player as disconnected instead of removing
-                    let marked = if let Some(ps) = room
+                    let marked = if let Some((_, ps)) = room
                         .state
-                        .players
-                        .values_mut()
-                        .find(|ps| ps.player.id == *user_id)
+                        .iter_players_mut()
+                        .find(|(_, ps)| ps.player.id == *user_id)
                     {
                         ps.is_connected = false;
                         true
@@ -525,7 +525,7 @@ impl RoomService {
             }
             RoomActionData::RoomManage(manage) => {
                 // Check if user is owner and already in room
-                let in_room = room.state.players.values().any(|p| p.player.id == *user_id)
+                let in_room = room.state.iter_players().any(|(_, p)| p.player.id == *user_id)
                     || room.state.observers.contains_key(user_id);
                 if room.info.owner == *user_id && in_room {
                     match manage {
@@ -559,9 +559,14 @@ impl RoomService {
                             }
                         }
                         RoomManage::AddBot(add_bot) => {
-                            // Check seat is empty
-                            if room.state.players.contains_key(&add_bot.position) {
-                                tracing::warn!("AddBot: seat {:?} is occupied", add_bot.position);
+                            let is_vacant = room
+                                .state
+                                .positions
+                                .seats
+                                .get(&add_bot.position)
+                                .is_some_and(|seat| matches!(seat, SeatState::Vacant));
+                            if !is_vacant {
+                                tracing::warn!("AddBot: seat {:?} is not vacant", add_bot.position);
                                 return Ok(None);
                             }
 
@@ -575,7 +580,7 @@ impl RoomService {
                             let bot_id = bot_user.id.clone();
 
                             // Sit the bot at the requested position (bots are auto-ready)
-                            room.state.players.insert(
+                            room.state.set_player_state(
                                 add_bot.position.clone(),
                                 RoomPlayerState {
                                     id_ready: true,
@@ -591,7 +596,7 @@ impl RoomService {
                             {
                                 tracing::error!("AddBot: failed to connect bot agent: {}", e);
                                 // Rollback: remove from room
-                                room.state.players.remove(&add_bot.position);
+                                let _ = room.state.clear_position(&add_bot.position);
                                 return Ok(None);
                             }
 
@@ -610,15 +615,20 @@ impl RoomService {
                             // Not implemented yet
                         }
                         RoomManage::StartGame => {
-                            // Validate: enough players and all ready
-                            if room.state.player_count() < 3 {
-                                tracing::warn!(
-                                    "StartGame: not enough players ({}/3)",
-                                    room.state.player_count()
-                                );
+                            // Validate: seat occupancy and ready state
+                            let occupied = room.state.player_count();
+                            let can_start = match room.state.positions.mode {
+                                PositionMode::Fixed => occupied == room.state.positions.seats.len(),
+                                PositionMode::Flexible {
+                                    min_players,
+                                    max_players,
+                                } => occupied >= min_players && occupied <= max_players,
+                            };
+                            if !can_start {
+                                tracing::warn!("StartGame: seat constraints not satisfied");
                                 return Ok(None);
                             }
-                            if !room.state.players.values().all(|p| p.id_ready) {
+                            if !room.state.all_players_ready() {
                                 tracing::warn!("StartGame: not all players are ready");
                                 return Ok(None);
                             }
@@ -654,9 +664,9 @@ impl RoomService {
                 // Mark user as connected
                 if let Some(ps) = room
                     .state
-                    .players
-                    .values_mut()
-                    .find(|ps| ps.player.id == *user_id)
+                    .iter_players_mut()
+                    .find(|(_, ps)| ps.player.id == *user_id)
+                    .map(|(_, ps)| ps)
                 {
                     ps.is_connected = true;
                 } else if let Some(os) = room.state.observers.get_mut(user_id) {
@@ -733,7 +743,7 @@ impl RoomService {
                     };
                     // Reset ready state for human players only;
                     // bots stay ready so the owner can immediately start the next game.
-                    for player in room.state.players.values_mut() {
+                    for (_, player) in room.state.iter_players_mut() {
                         if !player.player.is_bot {
                             player.id_ready = false;
                         }
@@ -760,7 +770,7 @@ impl RoomService {
         // 1. Position-specific views
         for (view, view_update) in views {
             if let openplay_basic::room::RoomView::Position(pos) = view {
-                if let Some(player_state) = room.state.players.get(pos) {
+                if let Some(player_state) = room.state.get_player_state(pos) {
                     let pid = player_state.player.id.clone();
                     controller
                         .send_game_view_update(view_update.clone(), pid.clone())
@@ -773,7 +783,7 @@ impl RoomService {
         // 2. Neutral view to remaining users
         if let Some(neutral_update) = views.get(&openplay_basic::room::RoomView::Neutral) {
             let mut remaining_users = Vec::new();
-            for p in room.state.players.values() {
+            for (_, p) in room.state.iter_players() {
                 if !recipients_handled.contains(&p.player.id) {
                     remaining_users.push(p.player.id.clone());
                 }
@@ -812,13 +822,7 @@ impl RoomService {
         };
 
         // Find user's seat position
-        let user_position = room.state.players.iter().find_map(|(pos, ps)| {
-            if ps.player.id == *user_id {
-                Some(pos.clone())
-            } else {
-                None
-            }
-        });
+        let user_position = room.state.find_player_position(user_id);
 
         if let Some(pos) = user_position {
             // Player: send position-specific view

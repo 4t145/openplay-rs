@@ -1,6 +1,8 @@
 mod data;
+mod games;
 mod game_components;
 mod global_config;
+mod network;
 mod scenes;
 mod state;
 mod ui;
@@ -55,7 +57,9 @@ fn main() {
         )
         .add_plugins(scenes::ScenesPlugin)
         .add_plugins(game_components::GameComponentsPlugin)
+        .add_plugins(games::GamesPlugin)
         .add_plugins(ui::UiPlugin)
+        .add_plugins(network::NetworkPlugin)
         .add_systems(Startup, setup_camera)
         .add_systems(Startup, global_config::theme_manager::setup_default_theme)
         .run();
@@ -66,6 +70,7 @@ fn setup_camera(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 0.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+        IsDefaultUiCamera,
         MainCamera,
     ));
 }

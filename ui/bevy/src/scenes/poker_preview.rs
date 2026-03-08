@@ -1,7 +1,7 @@
 use crate::MainState;
 use crate::game_components::poker::{PokerCard, PokerCardBundle};
 use crate::state::OverlayState;
-use crate::ui::Hud;
+use crate::ui::Ui;
 use bevy::{asset, prelude::*};
 use openplay_poker::{Rank, Suit};
 
@@ -126,7 +126,7 @@ fn setup_preview(
     }
 
     commands.spawn((
-        Hud,
+        Ui,
         Node {
             width: percent(100),
             height: percent(100),

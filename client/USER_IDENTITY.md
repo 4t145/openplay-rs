@@ -10,6 +10,7 @@
 {
   "signing_key": "<base64-standard-encoded 32-byte ed25519 seed>",
   "user": {
+    "id": "<base64-encoded-ed25519-public-key>",
     "nickname": "player",
     "avatar_url": null,
     "is_bot": false
@@ -22,9 +23,12 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `signing_key` | string | ed25519 私钥 seed，标准 Base64 编码（32 字节）|
+| `user.id` | string | 用户公钥（`UserId`，Base64）|
 | `user.nickname` | string | 显示昵称 |
 | `user.avatar_url` | string \| null | 头像 URL，可省略 |
 | `user.is_bot` | bool | 是否为机器人账号，默认 `false` |
+
+`user.id` 必须与 `signing_key` 推导出的公钥一致，否则 `KeyPair::load` 会报错。
 
 ## 文件命名
 

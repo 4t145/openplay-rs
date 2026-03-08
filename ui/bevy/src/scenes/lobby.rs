@@ -1,7 +1,8 @@
+use crate::network::ConnectTarget;
 use crate::state::MainState;
 use bevy::prelude::*;
 use bevy::window::Window;
-use bevy_ui_text_input::{TextInputMode, TextInputNode, TextInputPrompt};
+use bevy_ui_text_input::{TextInputContents, TextInputMode, TextInputNode, TextInputPrompt};
 pub struct LobbyScenesPlugin;
 
 impl Plugin for LobbyScenesPlugin {
@@ -97,6 +98,8 @@ pub fn ui_room_navigator(asset_server: Res<AssetServer>) -> impl Bundle {
 
 pub fn handle_enter_room_button(
     mut next_state: ResMut<NextState<MainState>>,
+    mut connect_target: ResMut<ConnectTarget>,
+    input_query: Query<&TextInputContents, With<UiRoomNavigatorInput>>,
     mut interaction_query: Query<
         (&Interaction, &mut Button),
         (
@@ -108,6 +111,12 @@ pub fn handle_enter_room_button(
 ) {
     for (interaction, mut button) in &mut interaction_query {
         if *interaction == Interaction::Pressed {
+            if let Ok(input) = input_query.single() {
+                let value = input.get().trim();
+                if !value.is_empty() {
+                    connect_target.server_url = value.to_string();
+                }
+            }
             next_state.set(MainState::ConnectingGameRoom);
             button.set_changed(); // Mark button as changed to update its state
         }
@@ -145,6 +154,7 @@ pub fn cleanup_lobby(
     main_window.ime_enabled = false;
 
     for entity in query.iter() {
+        commands.entity(entity).despawn_children();
         commands.entity(entity).despawn();
     }
 }

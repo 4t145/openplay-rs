@@ -1,8 +1,10 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{
     message::{App, TypedData},
-    room::{RoomContext, RoomView},
+    room::{RoomContext, RoomPlayerPosition, RoomView},
     user::Action,
 };
 
@@ -68,9 +70,23 @@ where
 
 pub type DynGame = Box<dyn Game>;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GameMeta {
     pub app: App,
     pub description: String,
+    pub position_spec: PositionSpec,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum PositionSpec {
+    Fixed {
+        positions: Vec<RoomPlayerPosition>,
+    },
+    Flexible {
+        min_players: usize,
+        max_players: usize,
+        default_players: usize,
+    },
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]

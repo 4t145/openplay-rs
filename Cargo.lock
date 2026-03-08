@@ -4970,9 +4970,13 @@ dependencies = [
  "bevy",
  "bevy_asset_loader",
  "bevy_ui_text_input",
+ "futures",
  "openplay-basic",
  "openplay-client",
+ "openplay-doudizhu",
  "openplay-poker",
+ "serde_json",
+ "tokio",
  "wasm-bindgen",
 ]
 

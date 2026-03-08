@@ -47,4 +47,7 @@ pub mod identity;
 // 便捷 re-export
 pub use auth::authenticate;
 pub use connection::{RoomClient, SseEvent};
-pub use identity::{KeyPair, default_user_dir, load_or_create};
+pub use identity::{
+    KeyPair, default_user_dir, load_first_identity, load_first_or_create_random, load_or_create,
+    random_nickname,
+};

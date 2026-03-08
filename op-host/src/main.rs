@@ -6,6 +6,7 @@ use clap::Parser;
 use config::{Config, Environment, File};
 use op_host::{run_server, RoomServer};
 use openplay_basic::data::Data;
+use openplay_basic::game::Game;
 use openplay_basic::game::GameViewUpdate;
 use openplay_basic::message::{DataType, TypedData};
 use openplay_basic::room::{Room, RoomInfo};
@@ -271,10 +272,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         description: config.description,
         owner: owner_id,
         endpoint,
+        game_meta: game.meta(),
         game_config: None,
     };
 
-    let room = Room::new(room_info);
+    let room = Room::new_with_position_spec(room_info, &game.meta().position_spec);
 
     // Create Room Service with bot factory
     let bot_factory = Arc::new(DoudizhuBotFactory::new());
